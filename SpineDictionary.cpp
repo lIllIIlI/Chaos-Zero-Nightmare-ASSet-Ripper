@@ -61,46 +61,35 @@ namespace {
         return parts;
     }
 
-    // Generic names that shouldn't be used as display names
-    bool is_generic_name(const std::string& name) {
-        std::string lower = to_lower(name);
-        return lower == "model" || lower == "skeleton" || lower == "skel"
-            || lower == "spine" || lower == "data" || lower == "default"
-            || lower == "anim" || lower == "animation";
-    }
-
-    // Build a meaningful display name from a full path
-    // For "spine/e_terra_underlab_1/model.scsp" -> "e_terra_underlab_1"
-    // For "spine/characters/hero/model/model.scsp" -> "hero/model"
-    // For "spine/hero/-1800.scsp" -> "hero"
+    // Build a display name from a full path by stripping the top-level category
+    // and the filename, showing the remaining folder path.
+    // "spine/e_terra_underlab_1/-1800.scsp" -> "e_terra_underlab_1"
+    // "spine/characters/hero_01/model/model.scsp" -> "characters/hero_01/model"
+    // "bg/e_terra_underlab_1/model.scsp" -> "e_terra_underlab_1"
     std::string build_display_name(const std::string& full_path) {
         auto parts = split_path(full_path);
-        if (parts.empty()) return full_path;
+        if (parts.size() <= 1) return strip_extension(get_basename(full_path));
 
-        // Remove filename (last component)
-        parts.pop_back();
-        if (parts.empty()) return strip_extension(get_basename(full_path));
-
-        // Walk backwards, skip generic names to find meaningful parent
-        // But include at most 2 levels for context
+        // Remove filename (last part) and category (first part)
+        // What remains is the meaningful path
+        // e.g. ["spine", "characters", "hero_01", "model", "model.scsp"]
+        //   -> strip first and last -> ["characters", "hero_01", "model"]
+        //   -> "characters/hero_01/model"
         std::string result;
-        int meaningful_count = 0;
-        for (int i = (int)parts.size() - 1; i >= 0 && meaningful_count < 2; i--) {
-            if (is_generic_name(parts[i]) && meaningful_count == 0) {
-                // Skip generic names at the leaf, but if we already have one, stop
-                if (i > 0) continue;
-            }
-            if (result.empty())
-                result = parts[i];
-            else
-                result = parts[i] + "/" + result;
-            meaningful_count++;
+        size_t start = 1;  // skip category (first component)
+        size_t end = parts.size() - 1;  // skip filename (last component)
 
-            // If we found a non-generic name, that's probably enough
-            if (!is_generic_name(parts[i])) break;
+        if (start >= end) {
+            // Only category + filename, no middle path
+            return strip_extension(parts.back());
         }
 
-        return result.empty() ? parts.back() : result;
+        for (size_t i = start; i < end; i++) {
+            if (!result.empty()) result += "/";
+            result += parts[i];
+        }
+
+        return result;
     }
 }
 
