@@ -1,8 +1,10 @@
 #include "SpineDictionary.h"
 #include "DataPack.h"
 #include "SCSPParser.h"
+#include "Logger.h"
 #include <algorithm>
 #include <sstream>
+#include <set>
 
 namespace {
     std::string to_lower(std::string s) {
@@ -46,6 +48,59 @@ namespace {
             if (c == '\\') c = '/';
         }
         return result;
+    }
+
+    // Split path into components: "a/b/c/d.scsp" -> ["a", "b", "c", "d.scsp"]
+    std::vector<std::string> split_path(const std::string& path) {
+        std::vector<std::string> parts;
+        std::istringstream ss(path);
+        std::string part;
+        while (std::getline(ss, part, '/')) {
+            if (!part.empty()) parts.push_back(part);
+        }
+        return parts;
+    }
+
+    // Generic names that shouldn't be used as display names
+    bool is_generic_name(const std::string& name) {
+        std::string lower = to_lower(name);
+        return lower == "model" || lower == "skeleton" || lower == "skel"
+            || lower == "spine" || lower == "data" || lower == "default"
+            || lower == "anim" || lower == "animation";
+    }
+
+    // Build a meaningful display name from a full path
+    // For "spine/e_terra_underlab_1/model.scsp" -> "e_terra_underlab_1"
+    // For "spine/characters/hero/model/model.scsp" -> "hero/model"
+    // For "spine/hero/-1800.scsp" -> "hero"
+    std::string build_display_name(const std::string& full_path) {
+        auto parts = split_path(full_path);
+        if (parts.empty()) return full_path;
+
+        // Remove filename (last component)
+        parts.pop_back();
+        if (parts.empty()) return strip_extension(get_basename(full_path));
+
+        // Walk backwards, skip generic names to find meaningful parent
+        // But include at most 2 levels for context
+        std::string result;
+        int meaningful_count = 0;
+        for (int i = (int)parts.size() - 1; i >= 0 && meaningful_count < 2; i--) {
+            if (is_generic_name(parts[i]) && meaningful_count == 0) {
+                // Skip generic names at the leaf, but if we already have one, stop
+                if (i > 0) continue;
+            }
+            if (result.empty())
+                result = parts[i];
+            else
+                result = parts[i] + "/" + result;
+            meaningful_count++;
+
+            // If we found a non-generic name, that's probably enough
+            if (!is_generic_name(parts[i])) break;
+        }
+
+        return result.empty() ? parts.back() : result;
     }
 }
 
@@ -113,37 +168,24 @@ std::vector<std::string> SpineDictionary::ParseAtlasTextureNames(const std::vect
 }
 
 void SpineDictionary::MatchEntries(DataPack& pack) {
+    LogInfo("SpineDictionary: matching " + std::to_string(scsp_files.size()) + " .scsp files against "
+            + std::to_string(atlas_files.size()) + " .atlas files");
+
+    int skipped_no_atlas = 0;
+
     for (auto& [scsp_path, scsp_node] : scsp_files) {
         SpineEntry entry;
         entry.name = strip_extension(scsp_node->name);
         entry.scsp_node = scsp_node;
         entry.atlas_node = nullptr;
 
-        // Use parent folder as display name, first component as category
+        // Build display name from full path (smart parent folder extraction)
         std::string norm_path = normalize_path(scsp_node->full_path);
-        std::string dir = get_directory(norm_path);
-        if (!dir.empty()) {
-            entry.display_name = get_basename(dir); // parent folder name
-            entry.category = get_first_component(norm_path);
-        } else {
-            entry.display_name = entry.name; // fallback to filename
-            entry.category = "";
-        }
-
-        // Try to extract header info
-        try {
-            std::vector<uint8_t> data = pack.GetFileData(*scsp_node);
-            if (!data.empty()) {
-                SCSPParser::HeaderInfo hdr = SCSPParser::ExtractHeader(data);
-                entry.width = hdr.width;
-                entry.height = hdr.height;
-                entry.version = hdr.version;
-                entry.images_path = hdr.images_path;
-                entry.hash = hdr.hash;
-            }
-        } catch (...) {}
+        entry.display_name = build_display_name(norm_path);
+        entry.category = get_first_component(norm_path);
 
         // Find matching atlas: same name in same directory
+        std::string dir = get_directory(norm_path);
         std::string base_name = strip_extension(scsp_node->name);
 
         std::string atlas_candidate = dir.empty() ? base_name + ".atlas" : dir + "/" + base_name + ".atlas";
@@ -165,54 +207,57 @@ void SpineDictionary::MatchEntries(DataPack& pack) {
             }
         }
 
-        // Parse atlas to find texture image references
-        if (entry.atlas_node) {
-            try {
-                std::vector<uint8_t> atlas_data = pack.GetFileData(*entry.atlas_node);
-                if (!atlas_data.empty()) {
-                    auto tex_names = ParseAtlasTextureNames(atlas_data);
-                    for (const auto& tex_name : tex_names) {
-                        const Core::FileNode* img = FindSiblingByName(
-                            normalize_path(entry.atlas_node->full_path), tex_name);
-                        if (img) {
-                            entry.image_nodes.push_back(img);
-                        }
-
-                        if (!img && !entry.images_path.empty()) {
-                            std::string img_path = normalize_path(entry.images_path);
-                            if (!img_path.empty() && img_path.back() != '/') img_path += "/";
-                            img_path += tex_name;
-                            std::string scsp_dir = get_directory(scsp_path);
-                            std::string full_img = scsp_dir.empty() ? img_path : scsp_dir + "/" + img_path;
-                            auto it2 = all_files.find(normalize_path(full_img));
-                            if (it2 != all_files.end()) {
-                                entry.image_nodes.push_back(it2->second);
-                            }
-                        }
-                    }
-                }
-            } catch (...) {}
+        // FILTER: skip entries without an atlas — they're not renderable Spine assets
+        if (!entry.atlas_node) {
+            skipped_no_atlas++;
+            continue;
         }
 
-        // If no atlas but we have images_path, try to find images directly
-        if (entry.image_nodes.empty() && !entry.images_path.empty()) {
-            std::string scsp_dir = get_directory(scsp_path);
-            std::string img_dir = normalize_path(entry.images_path);
-            std::string search_dir = scsp_dir.empty() ? img_dir : scsp_dir + "/" + img_dir;
-            if (!search_dir.empty() && search_dir.back() == '/') search_dir.pop_back();
+        // Extract header info (lightweight, just reads first ~100 bytes after decompress)
+        try {
+            std::vector<uint8_t> data = pack.GetFileData(*entry.scsp_node);
+            if (!data.empty()) {
+                SCSPParser::HeaderInfo hdr = SCSPParser::ExtractHeader(data);
+                entry.width = hdr.width;
+                entry.height = hdr.height;
+                entry.version = hdr.version;
+                entry.images_path = hdr.images_path;
+                entry.hash = hdr.hash;
+            }
+        } catch (...) {}
 
-            for (auto& [fpath, fnode] : all_files) {
-                if (get_directory(fpath) == search_dir) {
-                    std::string ext = get_extension(fnode->name);
-                    if (ext == ".sct" || ext == ".sct2" || ext == ".png" || ext == ".jpg") {
-                        entry.image_nodes.push_back(fnode);
+        // Parse atlas to find texture image references
+        try {
+            std::vector<uint8_t> atlas_data = pack.GetFileData(*entry.atlas_node);
+            if (!atlas_data.empty()) {
+                auto tex_names = ParseAtlasTextureNames(atlas_data);
+                for (const auto& tex_name : tex_names) {
+                    const Core::FileNode* img = FindSiblingByName(
+                        normalize_path(entry.atlas_node->full_path), tex_name);
+                    if (img) {
+                        entry.image_nodes.push_back(img);
+                    }
+
+                    if (!img && !entry.images_path.empty()) {
+                        std::string img_path = normalize_path(entry.images_path);
+                        if (!img_path.empty() && img_path.back() != '/') img_path += "/";
+                        img_path += tex_name;
+                        std::string scsp_dir = get_directory(scsp_path);
+                        std::string full_img = scsp_dir.empty() ? img_path : scsp_dir + "/" + img_path;
+                        auto it2 = all_files.find(normalize_path(full_img));
+                        if (it2 != all_files.end()) {
+                            entry.image_nodes.push_back(it2->second);
+                        }
                     }
                 }
             }
-        }
+        } catch (...) {}
 
         entries.push_back(std::move(entry));
     }
+
+    LogInfo("SpineDictionary: " + std::to_string(entries.size()) + " entries with atlas, "
+            + std::to_string(skipped_no_atlas) + " skipped (no atlas)");
 
     // Sort entries by display_name
     std::sort(entries.begin(), entries.end(),
@@ -221,7 +266,7 @@ void SpineDictionary::MatchEntries(DataPack& pack) {
 
 void SpineDictionary::BuildCategories() {
     categories.clear();
-    std::map<std::string, size_t> cat_map; // category name -> index in categories vector
+    std::map<std::string, size_t> cat_map;
 
     for (size_t i = 0; i < entries.size(); i++) {
         const std::string& cat = entries[i].category;
@@ -244,8 +289,13 @@ void SpineDictionary::BuildCategories() {
 
 void SpineDictionary::Build(DataPack& pack, const Core::FileNode& root) {
     Clear();
+    LogInfo("SpineDictionary: scanning file tree...");
     CollectFiles(root);
+    LogInfo("SpineDictionary: found " + std::to_string(scsp_files.size()) + " .scsp, "
+            + std::to_string(atlas_files.size()) + " .atlas, "
+            + std::to_string(all_files.size()) + " total files");
     MatchEntries(pack);
     BuildCategories();
+    LogInfo("SpineDictionary: built " + std::to_string(categories.size()) + " categories");
     built = true;
 }

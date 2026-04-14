@@ -109,5 +109,10 @@ private:
     bool flipX = false;
     bool flipY = false;
     std::string errorMsg;
+
+    // Cached bounds (computed once on load, not per-frame)
+    float cachedBoundsX = 0, cachedBoundsY = 0, cachedBoundsW = 0, cachedBoundsH = 0;
+    bool boundsComputed = false;
+    void computeStableBounds();
     std::vector<GLuint> ownedTextures;
 };

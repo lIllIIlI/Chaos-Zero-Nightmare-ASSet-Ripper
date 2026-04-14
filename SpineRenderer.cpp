@@ -4,6 +4,8 @@
 #include "SCSPParser.h"
 #include "SCTParser.h"
 
+#include "Logger.h"
+
 #include <SDL.h>
 #include <SDL_image.h>
 #include <cstring>
@@ -271,16 +273,20 @@ GLuint SpineViewer::loadTextureFromRGBA(const unsigned char* data, int width, in
 bool SpineViewer::loadSkeleton(DataPack& pack, const SpineEntry& entry) {
     unload();
     batchRenderer.init();
+    LogInfo("SpineViewer: loading skeleton '" + entry.display_name + "'");
 
     // 1. Read and convert SCSP to JSON
     std::string jsonStr;
     try {
         std::vector<uint8_t> scspData = pack.GetFileData(*entry.scsp_node);
-        if (scspData.empty()) { errorMsg = "Failed to read SCSP file"; return false; }
+        if (scspData.empty()) { errorMsg = "Failed to read SCSP file"; LogError("SpineViewer: " + errorMsg); return false; }
+        LogInfo("SpineViewer: SCSP data size=" + std::to_string(scspData.size()));
         jsonStr = SCSPParser::ConvertSCSPToJson(scspData);
-        if (jsonStr.empty()) { errorMsg = "Failed to convert SCSP to JSON"; return false; }
+        if (jsonStr.empty()) { errorMsg = "Failed to convert SCSP to JSON"; LogError("SpineViewer: " + errorMsg); return false; }
+        LogInfo("SpineViewer: JSON output size=" + std::to_string(jsonStr.size()));
     } catch (const std::exception& e) {
         errorMsg = std::string("SCSP parse error: ") + e.what();
+        LogError("SpineViewer: " + errorMsg);
         return false;
     }
 
@@ -290,20 +296,23 @@ bool SpineViewer::loadSkeleton(DataPack& pack, const SpineEntry& entry) {
         std::vector<uint8_t> atlasData = pack.GetFileData(*entry.atlas_node);
         if (!atlasData.empty()) {
             atlasStr = std::string(atlasData.begin(), atlasData.end());
+            LogInfo("SpineViewer: atlas size=" + std::to_string(atlasStr.size()));
         }
     }
     if (atlasStr.empty()) {
         errorMsg = "No atlas file found for this skeleton";
+        LogError("SpineViewer: " + errorMsg);
         return false;
     }
 
     // 3. Load texture images and register with texture loader
+    LogInfo("SpineViewer: loading " + std::to_string(entry.image_nodes.size()) + " texture(s)");
     for (const auto* imgNode : entry.image_nodes) {
         if (!std::holds_alternative<Core::FileInfo>(imgNode->data)) continue;
         const auto& fi = std::get<Core::FileInfo>(imgNode->data);
 
         std::vector<uint8_t> fileData = pack.GetFileData(*imgNode);
-        if (fileData.empty()) continue;
+        if (fileData.empty()) { LogError("SpineViewer: empty texture data for " + imgNode->name); continue; }
 
         std::string ext = fi.format;
         std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
@@ -311,28 +320,32 @@ bool SpineViewer::loadSkeleton(DataPack& pack, const SpineEntry& entry) {
         int w = 0, h = 0;
         GLuint tex = 0;
 
-        if (ext == ".sct" || ext == ".sct2") {
-            SCTParser::RGBAImage rgba = SCTParser::ConvertToRGBA(fileData);
-            if (rgba.data.empty()) continue;
-            w = rgba.width; h = rgba.height;
-            tex = loadTextureFromRGBA(rgba.data.data(), w, h);
-        } else {
-            // PNG/JPG — use SDL2_image
-            SDL_RWops* rw = SDL_RWFromMem(fileData.data(), (int)fileData.size());
-            if (!rw) continue;
-            SDL_Surface* surface = IMG_Load_RW(rw, 1);
-            if (!surface) continue;
-            SDL_Surface* rgba = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_ABGR8888, 0);
-            SDL_FreeSurface(surface);
-            if (!rgba) continue;
-            w = rgba->w; h = rgba->h;
-            tex = loadTextureFromRGBA((const unsigned char*)rgba->pixels, w, h);
-            SDL_FreeSurface(rgba);
+        try {
+            if (ext == ".sct" || ext == ".sct2") {
+                SCTParser::RGBAImage rgba = SCTParser::ConvertToRGBA(fileData);
+                if (rgba.data.empty()) { LogError("SpineViewer: SCT decode failed for " + imgNode->name); continue; }
+                w = rgba.width; h = rgba.height;
+                tex = loadTextureFromRGBA(rgba.data.data(), w, h);
+            } else {
+                SDL_RWops* rw = SDL_RWFromMem(fileData.data(), (int)fileData.size());
+                if (!rw) continue;
+                SDL_Surface* surface = IMG_Load_RW(rw, 1);
+                if (!surface) { LogError("SpineViewer: IMG_Load failed for " + imgNode->name); continue; }
+                SDL_Surface* rgba = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_ABGR8888, 0);
+                SDL_FreeSurface(surface);
+                if (!rgba) continue;
+                w = rgba->w; h = rgba->h;
+                tex = loadTextureFromRGBA((const unsigned char*)rgba->pixels, w, h);
+                SDL_FreeSurface(rgba);
+            }
+        } catch (const std::exception& e) {
+            LogError("SpineViewer: texture load exception for " + imgNode->name + ": " + e.what());
+            continue;
         }
 
         if (tex) {
+            LogInfo("SpineViewer: loaded texture '" + imgNode->name + "' " + std::to_string(w) + "x" + std::to_string(h) + " GL=" + std::to_string(tex));
             textureLoader.registerTexture(imgNode->name, tex, w, h);
-            // Also register with .png extension substituted
             std::string pngName = imgNode->name;
             size_t dotPos = pngName.rfind('.');
             if (dotPos != std::string::npos) {
@@ -344,11 +357,9 @@ bool SpineViewer::loadSkeleton(DataPack& pack, const SpineEntry& entry) {
 
     // 4. Create spine Atlas from text + texture loader
     try {
-        // Replace .sct refs with .png in atlas (spine runtime expects .png)
         std::string atlasFixed = atlasStr;
         size_t pos = 0;
         while ((pos = atlasFixed.find(".sct", pos)) != std::string::npos) {
-            // Check it's not .sct2
             if (pos + 4 < atlasFixed.size() && atlasFixed[pos + 4] == '2') {
                 atlasFixed.replace(pos, 5, ".png");
                 pos += 4;
@@ -358,51 +369,144 @@ bool SpineViewer::loadSkeleton(DataPack& pack, const SpineEntry& entry) {
             }
         }
 
+        LogInfo("SpineViewer: creating Atlas...");
         atlas = new spine::Atlas(atlasFixed.c_str(), (int)atlasFixed.size(), "", &textureLoader, true);
+        LogInfo("SpineViewer: Atlas created, pages=" + std::to_string(atlas->getPages().size())
+                + " regions=" + std::to_string(atlas->getRegions().size()));
+    } catch (const std::exception& e) {
+        errorMsg = std::string("Failed to create spine Atlas: ") + e.what();
+        LogError("SpineViewer: " + errorMsg);
+        return false;
     } catch (...) {
-        errorMsg = "Failed to create spine Atlas";
+        errorMsg = "Failed to create spine Atlas (unknown error)";
+        LogError("SpineViewer: " + errorMsg);
         return false;
     }
 
     // 5. Load skeleton data from JSON
     try {
+        LogInfo("SpineViewer: parsing skeleton JSON...");
         spine::SkeletonJson json(atlas);
         json.setScale(1.0f);
         skeletonData = json.readSkeletonData(jsonStr.c_str());
         if (!skeletonData) {
             errorMsg = "Failed to parse skeleton JSON";
+            LogError("SpineViewer: " + errorMsg);
             return false;
         }
+        LogInfo("SpineViewer: skeleton loaded, bones=" + std::to_string(skeletonData->getBones().size())
+                + " slots=" + std::to_string(skeletonData->getSlots().size())
+                + " anims=" + std::to_string(skeletonData->getAnimations().size())
+                + " skins=" + std::to_string(skeletonData->getSkins().size()));
+    } catch (const std::exception& e) {
+        errorMsg = std::string("Exception loading skeleton: ") + e.what();
+        LogError("SpineViewer: " + errorMsg);
+        return false;
     } catch (...) {
-        errorMsg = "Exception loading skeleton data";
+        errorMsg = "Exception loading skeleton data (unknown)";
+        LogError("SpineViewer: " + errorMsg);
         return false;
     }
 
     // 6. Create skeleton and animation state
-    skeleton = new spine::Skeleton(skeletonData);
-    skeleton->setToSetupPose();
-    skeleton->updateWorldTransform();
+    try {
+        skeleton = new spine::Skeleton(skeletonData);
+        skeleton->setToSetupPose();
+        skeleton->updateWorldTransform();
 
-    stateData = new spine::AnimationStateData(skeletonData);
-    stateData->setDefaultMix(0.2f);
-    animState = new spine::AnimationState(stateData);
+        stateData = new spine::AnimationStateData(skeletonData);
+        stateData->setDefaultMix(0.2f);
+        animState = new spine::AnimationState(stateData);
 
-    // Set first animation if available
+        auto& anims = skeletonData->getAnimations();
+        if (anims.size() > 0) {
+            LogInfo("SpineViewer: setting animation '" + std::string(anims[0]->getName().buffer()) + "'");
+            animState->setAnimation(0, anims[0]->getName(), true);
+        }
+    } catch (const std::exception& e) {
+        errorMsg = std::string("Exception creating skeleton instance: ") + e.what();
+        LogError("SpineViewer: " + errorMsg);
+        return false;
+    }
+
+    computeStableBounds();
+    LogInfo("SpineViewer: skeleton loaded successfully, bounds=("
+            + std::to_string((int)cachedBoundsX) + "," + std::to_string((int)cachedBoundsY) + " "
+            + std::to_string((int)cachedBoundsW) + "x" + std::to_string((int)cachedBoundsH) + ")");
+    return true;
+}
+
+void SpineViewer::computeStableBounds() {
+    if (!skeleton || !animState) return;
+
+    // Sample multiple frames of the animation to find the maximum bounding box
+    float minX = 1e9f, minY = 1e9f, maxX = -1e9f, maxY = -1e9f;
+    spine::Vector<float> vbuf;
+
+    // Sample 20 frames across the animation duration
     auto& anims = skeletonData->getAnimations();
+    float duration = 1.0f;
+    if (anims.size() > 0) {
+        duration = anims[0]->getDuration();
+        if (duration <= 0) duration = 1.0f;
+    }
+
+    for (int frame = 0; frame <= 20; frame++) {
+        float t = (frame / 20.0f) * duration;
+        animState->update(t == 0 ? 0 : duration / 20.0f);
+        animState->apply(*skeleton);
+        skeleton->updateWorldTransform();
+
+        float bx, by, bw, bh;
+        skeleton->getBounds(bx, by, bw, bh, vbuf);
+        if (bw > 0 && bh > 0) {
+            minX = std::min(minX, bx);
+            minY = std::min(minY, by);
+            maxX = std::max(maxX, bx + bw);
+            maxY = std::max(maxY, by + bh);
+        }
+    }
+
+    // Reset animation back to start
+    skeleton->setToSetupPose();
+    animState->clearTracks();
     if (anims.size() > 0) {
         animState->setAnimation(0, anims[0]->getName(), true);
     }
+    animState->update(0);
+    animState->apply(*skeleton);
+    skeleton->updateWorldTransform();
 
-    return true;
+    if (maxX > minX && maxY > minY) {
+        cachedBoundsX = minX;
+        cachedBoundsY = minY;
+        cachedBoundsW = maxX - minX;
+        cachedBoundsH = maxY - minY;
+    } else {
+        // Fallback to skeleton data dimensions
+        cachedBoundsW = skeletonData->getWidth();
+        cachedBoundsH = skeletonData->getHeight();
+        if (cachedBoundsW <= 0) cachedBoundsW = 800;
+        if (cachedBoundsH <= 0) cachedBoundsH = 800;
+        cachedBoundsX = -cachedBoundsW / 2;
+        cachedBoundsY = -cachedBoundsH / 2;
+    }
+    boundsComputed = true;
 }
 
 void SpineViewer::update(float deltaTime) {
     if (!skeleton || !animState) return;
-    skeleton->setScaleX(flipX ? -1.0f : 1.0f);
-    skeleton->setScaleY(flipY ? -1.0f : 1.0f);
-    animState->update(deltaTime);
-    animState->apply(*skeleton);
-    skeleton->updateWorldTransform();
+    try {
+        skeleton->setScaleX(flipX ? -1.0f : 1.0f);
+        skeleton->setScaleY(flipY ? -1.0f : 1.0f);
+        animState->update(deltaTime);
+        animState->apply(*skeleton);
+        skeleton->updateWorldTransform();
+    } catch (const std::exception& e) {
+        LogError("SpineViewer::update exception: " + std::string(e.what()));
+    } catch (...) {
+        LogError("SpineViewer::update unknown exception");
+    }
 }
 
 void SpineViewer::render(int viewportWidth, int viewportHeight) {
@@ -424,17 +528,14 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
 
-    // Compute bounds for auto-centering
-    float bx, by, bw, bh;
-    spine::Vector<float> vbuf;
-    skeleton->getBounds(bx, by, bw, bh, vbuf);
+    // Use cached stable bounds (computed once on load from multiple animation frames)
+    float bx = cachedBoundsX;
+    float by = cachedBoundsY;
+    float bw = cachedBoundsW;
+    float bh = cachedBoundsH;
 
-    // If bounds are degenerate, use skeleton dimensions
     if (bw <= 0 || bh <= 0) {
-        bw = skeletonData->getWidth();
-        bh = skeletonData->getHeight();
-        bx = -bw / 2;
-        by = -bh / 2;
+        bw = 800; bh = 800; bx = -400; by = -400;
     }
 
     // Add padding
@@ -470,6 +571,7 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
     batchRenderer.begin(proj);
 
     // Render slots in draw order
+    try {
     auto& drawOrder = skeleton->getDrawOrder();
     for (size_t i = 0; i < drawOrder.size(); i++) {
         spine::Slot* slot = drawOrder[i];
@@ -489,22 +591,18 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
 
         // Interleaved vertex data: x, y, u, v, r, g, b, a
         static float worldVertices[8192];
-        const unsigned short* indices = nullptr;
-        int indexCount = 0;
-        int vertexCount = 0;
 
         if (attachment->getRTTI().isExactly(spine::RegionAttachment::rtti)) {
             auto* region = static_cast<spine::RegionAttachment*>(attachment);
+
+            auto* atlasRegion = (spine::AtlasRegion*)region->getRendererObject();
+            if (!atlasRegion || !atlasRegion->page || !atlasRegion->page->getRendererObject())
+                continue; // skip — no texture loaded for this attachment
+
+            texture = (GLuint)(uintptr_t)atlasRegion->page->getRendererObject();
             region->computeWorldVertices(slot->getBone(), worldVertices, 0, 2);
 
-            // Get texture
-            auto* atlasRegion = (spine::AtlasRegion*)region->getRendererObject();
-            if (atlasRegion && atlasRegion->page) {
-                texture = (GLuint)(uintptr_t)atlasRegion->page->getRendererObject();
-            }
-
-            // Region has 4 vertices; build interleaved data
-            static float regionVerts[8 * 4]; // 4 vertices * 8 floats
+            static float regionVerts[8 * 4];
             static unsigned short regionIndices[] = { 0, 1, 2, 2, 3, 0 };
             spine::Vector<float>& uvs = region->getUVs();
 
@@ -530,16 +628,17 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
         } else if (attachment->getRTTI().isExactly(spine::MeshAttachment::rtti)) {
             auto* mesh = static_cast<spine::MeshAttachment*>(attachment);
 
+            auto* atlasRegion = (spine::AtlasRegion*)mesh->getRendererObject();
+            if (!atlasRegion || !atlasRegion->page || !atlasRegion->page->getRendererObject())
+                continue; // skip — no texture loaded
+
+            texture = (GLuint)(uintptr_t)atlasRegion->page->getRendererObject();
+
             auto& meshIndices = mesh->getTriangles();
             auto& uvs = mesh->getUVs();
             int meshVertCount = (int)mesh->getWorldVerticesLength() / 2;
 
             mesh->computeWorldVertices(*slot, 0, mesh->getWorldVerticesLength(), worldVertices, 0, 2);
-
-            auto* atlasRegion = (spine::AtlasRegion*)mesh->getRendererObject();
-            if (atlasRegion && atlasRegion->page) {
-                texture = (GLuint)(uintptr_t)atlasRegion->page->getRendererObject();
-            }
 
             spine::Color attachColor = mesh->getColor();
             float r = tintR * attachColor.r;
@@ -573,6 +672,11 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
         clipper.clipEnd(*slot);
     }
     clipper.clipEnd();
+    } catch (const std::exception& e) {
+        LogError("SpineViewer::render exception: " + std::string(e.what()));
+    } catch (...) {
+        LogError("SpineViewer::render unknown exception");
+    }
 
     batchRenderer.end();
 
