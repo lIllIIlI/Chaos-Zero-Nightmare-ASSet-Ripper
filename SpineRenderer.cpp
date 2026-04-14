@@ -374,6 +374,12 @@ bool SpineViewer::loadSkeleton(DataPack& pack, const SpineEntry& entry) {
         atlas = new spine::Atlas(atlasFixed.c_str(), (int)atlasFixed.size(), "", &textureLoader, true);
         LogInfo("SpineViewer: Atlas created, pages=" + std::to_string(atlas->getPages().size())
                 + " regions=" + std::to_string(atlas->getRegions().size()));
+        if (atlas->getPages().size() == 0) {
+            errorMsg = "Atlas has no texture pages (textures missing or failed to load)";
+            LogError("SpineViewer: " + errorMsg);
+            delete atlas; atlas = nullptr;
+            return false;
+        }
     } catch (const std::exception& e) {
         errorMsg = std::string("Failed to create spine Atlas: ") + e.what();
         LogError("SpineViewer: " + errorMsg);

@@ -61,6 +61,12 @@ namespace {
         return parts;
     }
 
+    bool is_image_extension(const std::string& name) {
+        std::string ext = get_extension(name);
+        return ext == ".sct" || ext == ".sct2" || ext == ".png" || ext == ".jpg"
+            || ext == ".jpeg" || ext == ".bmp" || ext == ".webp" || ext == ".tga";
+    }
+
     // Build a display name from a full path by stripping the top-level category
     // and the filename, showing the remaining folder path.
     // "spine/e_terra_underlab_1/-1800.scsp" -> "e_terra_underlab_1"
@@ -223,7 +229,7 @@ void SpineDictionary::MatchEntries(DataPack& pack) {
                 for (const auto& tex_name : tex_names) {
                     const Core::FileNode* img = FindSiblingByName(
                         normalize_path(entry.atlas_node->full_path), tex_name);
-                    if (img) {
+                    if (img && is_image_extension(img->name)) {
                         entry.image_nodes.push_back(img);
                     }
 
@@ -234,7 +240,7 @@ void SpineDictionary::MatchEntries(DataPack& pack) {
                         std::string scsp_dir = get_directory(scsp_path);
                         std::string full_img = scsp_dir.empty() ? img_path : scsp_dir + "/" + img_path;
                         auto it2 = all_files.find(normalize_path(full_img));
-                        if (it2 != all_files.end()) {
+                        if (it2 != all_files.end() && is_image_extension(it2->second->name)) {
                             entry.image_nodes.push_back(it2->second);
                         }
                     }
