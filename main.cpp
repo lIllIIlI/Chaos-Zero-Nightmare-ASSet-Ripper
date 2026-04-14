@@ -129,6 +129,7 @@ static float spine_speed = 1.0f;
 static bool spine_playing = true;
 static bool spine_flip_x = false;
 static bool spine_flip_y = false;
+static float spine_zoom = 1.0f;
 static Uint64 spine_last_tick = 0;
 static std::unordered_set<std::string> spine_expanded_categories;
 
@@ -1951,17 +1952,28 @@ int main(int argc, char *argv[])
 
                             nk_layout_row_end(ctx);
 
-                            // Speed + mirror controls row
-                            nk_layout_row_begin(ctx, NK_STATIC, 28, 7);
+                            // Speed + zoom + mirror controls row
+                            nk_layout_row_begin(ctx, NK_STATIC, 28, 11);
 
                             nk_layout_row_push(ctx, 50);
                             nk_label(ctx, "Speed:", NK_TEXT_LEFT);
-                            nk_layout_row_push(ctx, 150);
+                            nk_layout_row_push(ctx, 120);
                             nk_slider_float(ctx, 0.1f, &spine_speed, 3.0f, 0.1f);
-                            nk_layout_row_push(ctx, 45);
+                            nk_layout_row_push(ctx, 40);
                             char speed_label[16];
                             snprintf(speed_label, sizeof(speed_label), "%.1fx", spine_speed);
                             nk_label(ctx, speed_label, NK_TEXT_LEFT);
+
+                            // Zoom
+                            nk_layout_row_push(ctx, 45);
+                            nk_label(ctx, "Zoom:", NK_TEXT_LEFT);
+                            nk_layout_row_push(ctx, 100);
+                            nk_slider_float(ctx, 0.1f, &spine_zoom, 5.0f, 0.1f);
+                            nk_layout_row_push(ctx, 40);
+                            char zoom_label[16];
+                            snprintf(zoom_label, sizeof(zoom_label), "%.1fx", spine_zoom);
+                            nk_label(ctx, zoom_label, NK_TEXT_LEFT);
+                            if (active_spine_viewer) active_spine_viewer->setZoom(spine_zoom);
 
                             // Flip X
                             nk_layout_row_push(ctx, 60);

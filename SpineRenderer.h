@@ -82,6 +82,9 @@ public:
     void setFlipY(bool flip) { flipY = flip; }
     bool getFlipX() const { return flipX; }
     bool getFlipY() const { return flipY; }
+    void setZoom(float z) { zoom = z; }
+    float getZoom() const { return zoom; }
+    void zoomBy(float factor) { zoom *= factor; if (zoom < 0.1f) zoom = 0.1f; if (zoom > 10.0f) zoom = 10.0f; }
     std::string getError() const { return errorMsg; }
 
 private:
@@ -108,6 +111,7 @@ private:
     bool playing = true;
     bool flipX = false;
     bool flipY = false;
+    float zoom = 1.0f;
     std::string errorMsg;
 
     // Cached bounds (computed once on load, not per-frame)
