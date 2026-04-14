@@ -25,6 +25,7 @@ add_executable(
     SCTParser.cpp
     DBParser.cpp
     SCSPParser.cpp
+    SpineDictionary.cpp
 )
 
 if(WIN32)
