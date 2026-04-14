@@ -1,3 +1,4 @@
+#define NOMINMAX
 #include "SpineRenderer.h"
 #include "SpineDictionary.h"
 #include "DataPack.h"
@@ -437,60 +438,32 @@ bool SpineViewer::loadSkeleton(DataPack& pack, const SpineEntry& entry) {
 }
 
 void SpineViewer::computeStableBounds() {
-    if (!skeleton || !animState) return;
+    if (!skeleton) return;
 
-    // Sample multiple frames of the animation to find the maximum bounding box
-    float minX = 1e9f, minY = 1e9f, maxX = -1e9f, maxY = -1e9f;
-    spine::Vector<float> vbuf;
+    // Use skeleton's declared dimensions, centered on origin.
+    // User can zoom to adjust. This avoids per-frame jitter.
+    cachedBoundsW = skeletonData->getWidth();
+    cachedBoundsH = skeletonData->getHeight();
 
-    // Sample 20 frames across the animation duration
-    auto& anims = skeletonData->getAnimations();
-    float duration = 1.0f;
-    if (anims.size() > 0) {
-        duration = anims[0]->getDuration();
-        if (duration <= 0) duration = 1.0f;
-    }
-
-    for (int frame = 0; frame <= 20; frame++) {
-        float t = (frame / 20.0f) * duration;
-        animState->update(t == 0 ? 0 : duration / 20.0f);
-        animState->apply(*skeleton);
-        skeleton->updateWorldTransform();
-
+    // If skeleton has no declared size, sample the setup pose
+    if (cachedBoundsW <= 0 || cachedBoundsH <= 0) {
+        spine::Vector<float> vbuf;
         float bx, by, bw, bh;
         skeleton->getBounds(bx, by, bw, bh, vbuf);
         if (bw > 0 && bh > 0) {
-            minX = std::min(minX, bx);
-            minY = std::min(minY, by);
-            maxX = std::max(maxX, bx + bw);
-            maxY = std::max(maxY, by + bh);
+            cachedBoundsX = bx;
+            cachedBoundsY = by;
+            cachedBoundsW = bw;
+            cachedBoundsH = bh;
+            boundsComputed = true;
+            return;
         }
+        cachedBoundsW = 800;
+        cachedBoundsH = 800;
     }
 
-    // Reset animation back to start
-    skeleton->setToSetupPose();
-    animState->clearTracks();
-    if (anims.size() > 0) {
-        animState->setAnimation(0, anims[0]->getName(), true);
-    }
-    animState->update(0);
-    animState->apply(*skeleton);
-    skeleton->updateWorldTransform();
-
-    if (maxX > minX && maxY > minY) {
-        cachedBoundsX = minX;
-        cachedBoundsY = minY;
-        cachedBoundsW = maxX - minX;
-        cachedBoundsH = maxY - minY;
-    } else {
-        // Fallback to skeleton data dimensions
-        cachedBoundsW = skeletonData->getWidth();
-        cachedBoundsH = skeletonData->getHeight();
-        if (cachedBoundsW <= 0) cachedBoundsW = 800;
-        if (cachedBoundsH <= 0) cachedBoundsH = 800;
-        cachedBoundsX = -cachedBoundsW / 2;
-        cachedBoundsY = -cachedBoundsH / 2;
-    }
+    cachedBoundsX = -cachedBoundsW / 2;
+    cachedBoundsY = -cachedBoundsH / 2;
     boundsComputed = true;
 }
 
