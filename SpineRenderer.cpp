@@ -506,7 +506,7 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
             // Region has 4 vertices; build interleaved data
             static float regionVerts[8 * 4]; // 4 vertices * 8 floats
             static unsigned short regionIndices[] = { 0, 1, 2, 2, 3, 0 };
-            float* uvs = region->getUVs();
+            spine::Vector<float>& uvs = region->getUVs();
 
             spine::Color attachColor = region->getColor();
             float r = tintR * attachColor.r;
