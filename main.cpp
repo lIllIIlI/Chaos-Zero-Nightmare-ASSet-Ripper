@@ -1953,7 +1953,7 @@ int main(int argc, char *argv[])
                             nk_layout_row_end(ctx);
 
                             // Speed + zoom + mirror controls row
-                            nk_layout_row_begin(ctx, NK_STATIC, 28, 11);
+                            nk_layout_row_begin(ctx, NK_STATIC, 28, 12);
 
                             nk_layout_row_push(ctx, 50);
                             nk_label(ctx, "Speed:", NK_TEXT_LEFT);
@@ -1968,6 +1968,7 @@ int main(int argc, char *argv[])
                             nk_layout_row_push(ctx, 45);
                             nk_label(ctx, "Zoom:", NK_TEXT_LEFT);
                             nk_layout_row_push(ctx, 100);
+                            if (active_spine_viewer) spine_zoom = active_spine_viewer->getZoom();
                             nk_slider_float(ctx, 0.1f, &spine_zoom, 5.0f, 0.1f);
                             nk_layout_row_push(ctx, 40);
                             char zoom_label[16];
@@ -2013,6 +2014,13 @@ int main(int argc, char *argv[])
                                     spine_flip_y = !spine_flip_y;
                                     active_spine_viewer->setFlipY(spine_flip_y);
                                 }
+                            }
+
+                            // Reset View
+                            nk_layout_row_push(ctx, 55);
+                            if (nk_button_label(ctx, "Reset")) {
+                                spine_zoom = 1.0f;
+                                if (active_spine_viewer) active_spine_viewer->resetView();
                             }
 
                             // Export All
@@ -2089,6 +2097,34 @@ int main(int argc, char *argv[])
                             struct nk_rect viewport_bounds = nk_widget_bounds(ctx);
                             int vpw = (int)viewport_bounds.w;
                             int vph = (int)viewport_bounds.h;
+
+                            // Mouse interaction on viewport: scroll to zoom, drag to pan
+                            {
+                                nk_input* in = &ctx->input;
+                                bool hovering = nk_input_is_mouse_hovering_rect(in, viewport_bounds);
+                                if (hovering) {
+                                    // Scroll wheel zoom
+                                    float scroll = in->mouse.scroll_delta.y;
+                                    if (scroll != 0) {
+                                        float factor = (scroll > 0) ? 1.15f : (1.0f / 1.15f);
+                                        active_spine_viewer->zoomBy(factor);
+                                        spine_zoom = active_spine_viewer->getZoom();
+                                    }
+
+                                    // Middle mouse or left mouse drag to pan
+                                    if (nk_input_is_mouse_down(in, NK_BUTTON_MIDDLE) ||
+                                        (nk_input_is_mouse_down(in, NK_BUTTON_LEFT) && (SDL_GetModState() & KMOD_SHIFT))) {
+                                        float dx = in->mouse.delta.x;
+                                        float dy = in->mouse.delta.y;
+                                        if (dx != 0 || dy != 0) {
+                                            // Convert pixel delta to world units based on current view size
+                                            float viewW = active_spine_viewer->getZoom() > 0 ? (float)vpw / active_spine_viewer->getZoom() : (float)vpw;
+                                            float scale = viewW / (float)vpw;
+                                            active_spine_viewer->pan(dx * scale, -dy * scale);
+                                        }
+                                    }
+                                }
+                            }
 
                             if (vpw > 0 && vph > 0) {
                                 active_spine_viewer->render(vpw, vph);

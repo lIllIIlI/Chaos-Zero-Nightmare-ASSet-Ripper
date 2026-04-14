@@ -519,10 +519,10 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
     float bottom = by - padY;
     float top = by + bh + padY;
 
-    // Apply zoom (zoom > 1 = zoom in = smaller view area)
-    if (zoom != 1.0f) {
-        float cx = (left + right) / 2.0f;
-        float cy = (bottom + top) / 2.0f;
+    // Apply zoom (zoom > 1 = zoom in = smaller view area) and pan
+    {
+        float cx = (left + right) / 2.0f - panX;
+        float cy = (bottom + top) / 2.0f - panY;
         float hw = (right - left) / (2.0f * zoom);
         float hh = (top - bottom) / (2.0f * zoom);
         left = cx - hw; right = cx + hw;

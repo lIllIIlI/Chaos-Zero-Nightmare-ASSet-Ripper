@@ -82,9 +82,13 @@ public:
     void setFlipY(bool flip) { flipY = flip; }
     bool getFlipX() const { return flipX; }
     bool getFlipY() const { return flipY; }
-    void setZoom(float z) { zoom = z; }
+    void setZoom(float z) { zoom = z; if (zoom < 0.1f) zoom = 0.1f; if (zoom > 10.0f) zoom = 10.0f; }
     float getZoom() const { return zoom; }
     void zoomBy(float factor) { zoom *= factor; if (zoom < 0.1f) zoom = 0.1f; if (zoom > 10.0f) zoom = 10.0f; }
+    void pan(float dx, float dy) { panX += dx; panY += dy; }
+    void resetView() { zoom = 1.0f; panX = 0; panY = 0; }
+    float getPanX() const { return panX; }
+    float getPanY() const { return panY; }
     std::string getError() const { return errorMsg; }
 
 private:
@@ -112,6 +116,7 @@ private:
     bool flipX = false;
     bool flipY = false;
     float zoom = 1.0f;
+    float panX = 0, panY = 0;
     std::string errorMsg;
 
     // Cached bounds (computed once on load, not per-frame)
