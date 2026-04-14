@@ -28,7 +28,18 @@ namespace {
         return path.substr(0, sep);
     }
 
-    // Normalize path separators to forward slash and lowercase for matching
+    std::string get_basename(const std::string& path) {
+        size_t sep = path.find_last_of('/');
+        if (sep == std::string::npos) return path;
+        return path.substr(sep + 1);
+    }
+
+    std::string get_first_component(const std::string& path) {
+        size_t sep = path.find('/');
+        if (sep == std::string::npos) return path;
+        return path.substr(0, sep);
+    }
+
     std::string normalize_path(const std::string& path) {
         std::string result = path;
         for (auto& c : result) {
@@ -40,6 +51,7 @@ namespace {
 
 void SpineDictionary::Clear() {
     entries.clear();
+    categories.clear();
     scsp_files.clear();
     atlas_files.clear();
     all_files.clear();
@@ -74,27 +86,13 @@ const Core::FileNode* SpineDictionary::FindSiblingByName(const std::string& scsp
 }
 
 std::vector<std::string> SpineDictionary::ParseAtlasTextureNames(const std::vector<uint8_t>& atlas_data) {
-    // Spine atlas format: texture filenames appear as lines that are NOT indented
-    // and typically end with .png, .sct, .sct2, .jpg etc.
-    // The format is:
-    //   <blank line>
-    //   texture_filename.png
-    //   size: 1024,1024
-    //   format: RGBA8888
-    //   filter: Linear,Linear
-    //   ...
-    //   region_name
-    //     rotate: false
-    //     xy: ...
-
     std::vector<std::string> textures;
     std::string content(atlas_data.begin(), atlas_data.end());
     std::istringstream ss(content);
     std::string line;
-    bool after_blank = true; // first texture can appear at start
+    bool after_blank = true;
 
     while (std::getline(ss, line)) {
-        // Strip \r if present
         if (!line.empty() && line.back() == '\r')
             line.pop_back();
 
@@ -103,10 +101,7 @@ std::vector<std::string> SpineDictionary::ParseAtlasTextureNames(const std::vect
             continue;
         }
 
-        // A texture name line: appears after a blank line (or at start),
-        // is not indented, and the next line should be "size:"
         if (after_blank && !line.empty() && line[0] != ' ' && line[0] != '\t') {
-            // Check if this looks like a filename (has an extension)
             if (line.find('.') != std::string::npos) {
                 textures.push_back(line);
             }
@@ -124,6 +119,17 @@ void SpineDictionary::MatchEntries(DataPack& pack) {
         entry.scsp_node = scsp_node;
         entry.atlas_node = nullptr;
 
+        // Use parent folder as display name, first component as category
+        std::string norm_path = normalize_path(scsp_node->full_path);
+        std::string dir = get_directory(norm_path);
+        if (!dir.empty()) {
+            entry.display_name = get_basename(dir); // parent folder name
+            entry.category = get_first_component(norm_path);
+        } else {
+            entry.display_name = entry.name; // fallback to filename
+            entry.category = "";
+        }
+
         // Try to extract header info
         try {
             std::vector<uint8_t> data = pack.GetFileData(*scsp_node);
@@ -135,15 +141,11 @@ void SpineDictionary::MatchEntries(DataPack& pack) {
                 entry.images_path = hdr.images_path;
                 entry.hash = hdr.hash;
             }
-        } catch (...) {
-            // Header extraction failed - continue with what we have
-        }
+        } catch (...) {}
 
         // Find matching atlas: same name in same directory
         std::string base_name = strip_extension(scsp_node->name);
-        std::string dir = get_directory(scsp_path);
 
-        // Try: same_dir/base_name.atlas
         std::string atlas_candidate = dir.empty() ? base_name + ".atlas" : dir + "/" + base_name + ".atlas";
         auto atlas_it = atlas_files.find(normalize_path(atlas_candidate));
         if (atlas_it != atlas_files.end()) {
@@ -170,20 +172,16 @@ void SpineDictionary::MatchEntries(DataPack& pack) {
                 if (!atlas_data.empty()) {
                     auto tex_names = ParseAtlasTextureNames(atlas_data);
                     for (const auto& tex_name : tex_names) {
-                        // Look for texture in same directory as atlas
-                        std::string atlas_dir = get_directory(normalize_path(entry.atlas_node->full_path));
                         const Core::FileNode* img = FindSiblingByName(
                             normalize_path(entry.atlas_node->full_path), tex_name);
                         if (img) {
                             entry.image_nodes.push_back(img);
                         }
 
-                        // Also check images_path relative location if we have it
                         if (!img && !entry.images_path.empty()) {
                             std::string img_path = normalize_path(entry.images_path);
                             if (!img_path.empty() && img_path.back() != '/') img_path += "/";
                             img_path += tex_name;
-                            // Try from the scsp directory
                             std::string scsp_dir = get_directory(scsp_path);
                             std::string full_img = scsp_dir.empty() ? img_path : scsp_dir + "/" + img_path;
                             auto it2 = all_files.find(normalize_path(full_img));
@@ -193,14 +191,11 @@ void SpineDictionary::MatchEntries(DataPack& pack) {
                         }
                     }
                 }
-            } catch (...) {
-                // Atlas parsing failed
-            }
+            } catch (...) {}
         }
 
         // If no atlas but we have images_path, try to find images directly
         if (entry.image_nodes.empty() && !entry.images_path.empty()) {
-            // Search for .sct/.png files in the images_path relative to scsp
             std::string scsp_dir = get_directory(scsp_path);
             std::string img_dir = normalize_path(entry.images_path);
             std::string search_dir = scsp_dir.empty() ? img_dir : scsp_dir + "/" + img_dir;
@@ -219,14 +214,38 @@ void SpineDictionary::MatchEntries(DataPack& pack) {
         entries.push_back(std::move(entry));
     }
 
-    // Sort entries by name
+    // Sort entries by display_name
     std::sort(entries.begin(), entries.end(),
-        [](const SpineEntry& a, const SpineEntry& b) { return a.name < b.name; });
+        [](const SpineEntry& a, const SpineEntry& b) { return a.display_name < b.display_name; });
+}
+
+void SpineDictionary::BuildCategories() {
+    categories.clear();
+    std::map<std::string, size_t> cat_map; // category name -> index in categories vector
+
+    for (size_t i = 0; i < entries.size(); i++) {
+        const std::string& cat = entries[i].category;
+        std::string cat_name = cat.empty() ? "(root)" : cat;
+        auto it = cat_map.find(cat_name);
+        if (it == cat_map.end()) {
+            cat_map[cat_name] = categories.size();
+            SpineCategory sc;
+            sc.name = cat_name;
+            sc.entry_indices.push_back(i);
+            categories.push_back(std::move(sc));
+        } else {
+            categories[it->second].entry_indices.push_back(i);
+        }
+    }
+
+    std::sort(categories.begin(), categories.end(),
+        [](const SpineCategory& a, const SpineCategory& b) { return a.name < b.name; });
 }
 
 void SpineDictionary::Build(DataPack& pack, const Core::FileNode& root) {
     Clear();
     CollectFiles(root);
     MatchEntries(pack);
+    BuildCategories();
     built = true;
 }
