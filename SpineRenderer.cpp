@@ -558,8 +558,13 @@ void SpineViewer::update(float deltaTime) {
         for (auto& [name, ovr] : boneOverrides) {
             spine::Bone* bone = skeleton->findBone(spine::String(name.c_str()));
             if (bone) {
+                bone->setX(ovr.x);
+                bone->setY(ovr.y);
+                bone->setRotation(ovr.rotation);
                 bone->setScaleX(ovr.scaleX);
                 bone->setScaleY(ovr.scaleY);
+                bone->setShearX(ovr.shearX);
+                bone->setShearY(ovr.shearY);
             }
         }
 
@@ -827,16 +832,39 @@ std::vector<SpineViewer::BoneInfo> SpineViewer::getBoneList() const {
     for (size_t i = 0; i < bones.size(); i++) {
         BoneInfo bi;
         bi.name = std::string(bones[i]->getData().getName().buffer());
-        bi.scaleX = bones[i]->getScaleX();
-        bi.scaleY = bones[i]->getScaleY();
-        bi.hasOverride = boneOverrides.count(bi.name) > 0;
+
+        // Setup pose values (stable, never change during animation)
+        spine::BoneData& data = bones[i]->getData();
+        bi.setupX = data.getX(); bi.setupY = data.getY();
+        bi.setupRot = data.getRotation();
+        bi.setupSX = data.getScaleX(); bi.setupSY = data.getScaleY();
+        bi.setupShX = data.getShearX(); bi.setupShY = data.getShearY();
+
+        // Effective values: override if edited, otherwise setup pose
+        auto it = boneOverrides.find(bi.name);
+        bi.hasOverride = (it != boneOverrides.end());
+        if (bi.hasOverride) {
+            bi.x = it->second.x; bi.y = it->second.y;
+            bi.rotation = it->second.rotation;
+            bi.scaleX = it->second.scaleX; bi.scaleY = it->second.scaleY;
+            bi.shearX = it->second.shearX; bi.shearY = it->second.shearY;
+        } else {
+            bi.x = bi.setupX; bi.y = bi.setupY;
+            bi.rotation = bi.setupRot;
+            bi.scaleX = bi.setupSX; bi.scaleY = bi.setupSY;
+            bi.shearX = bi.setupShX; bi.shearY = bi.setupShY;
+        }
         list.push_back(bi);
     }
     return list;
 }
 
-void SpineViewer::setBoneScale(const std::string& boneName, float scaleX, float scaleY) {
-    boneOverrides[boneName] = { scaleX, scaleY };
+void SpineViewer::setBoneOverride(const std::string& boneName, const BoneOverride& ovr) {
+    boneOverrides[boneName] = ovr;
+}
+
+void SpineViewer::resetBone(const std::string& boneName) {
+    boneOverrides.erase(boneName);
 }
 
 void SpineViewer::resetBoneEdits() {
@@ -921,8 +949,13 @@ std::string SpineViewer::getModifiedSkeletonJson() const {
                 std::string name = bone["name"].get<std::string>();
                 auto it = boneOverrides.find(name);
                 if (it != boneOverrides.end()) {
+                    bone["x"] = it->second.x;
+                    bone["y"] = it->second.y;
+                    bone["rotation"] = it->second.rotation;
                     bone["scaleX"] = it->second.scaleX;
                     bone["scaleY"] = it->second.scaleY;
+                    bone["shearX"] = it->second.shearX;
+                    bone["shearY"] = it->second.shearY;
                 }
             }
         }

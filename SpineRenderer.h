@@ -58,10 +58,12 @@ private:
     bool initialized = false;
 };
 
-// Bone edit override
+// Bone edit override — stores all editable bone properties
 struct BoneOverride {
-    float scaleX = 1.0f;
-    float scaleY = 1.0f;
+    float x = 0, y = 0;
+    float rotation = 0;
+    float scaleX = 1.0f, scaleY = 1.0f;
+    float shearX = 0, shearY = 0;
 };
 
 // Main Spine viewer class
@@ -104,10 +106,16 @@ public:
     float getPanY() const { return panY; }
     std::string getError() const { return errorMsg; }
 
-    // Bone editing
-    struct BoneInfo { std::string name; float scaleX; float scaleY; bool hasOverride; };
+    // Bone editing — values are from setup pose (stable, not animated)
+    struct BoneInfo {
+        std::string name;
+        float x, y, rotation, scaleX, scaleY, shearX, shearY; // current effective values
+        float setupX, setupY, setupRot, setupSX, setupSY, setupShX, setupShY; // original setup pose
+        bool hasOverride;
+    };
     std::vector<BoneInfo> getBoneList() const;
-    void setBoneScale(const std::string& boneName, float scaleX, float scaleY);
+    void setBoneOverride(const std::string& boneName, const BoneOverride& ovr);
+    void resetBone(const std::string& boneName);
     void resetBoneEdits();
     bool hasBoneOverrides() const { return !boneOverrides.empty(); }
     const std::map<std::string, BoneOverride>& getBoneOverrides() const { return boneOverrides; }
