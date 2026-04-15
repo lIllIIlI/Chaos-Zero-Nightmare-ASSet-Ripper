@@ -6,6 +6,7 @@
 #include "SCTParser.h"
 
 #include "Logger.h"
+#include "json.hpp"
 
 #include <SDL.h>
 #include <SDL_image.h>
@@ -254,8 +255,15 @@ void SpineViewer::unload() {
         glDeleteTextures(1, &tex);
     }
     ownedTextures.clear();
+    for (GLuint tex : swappedTextures) glDeleteTextures(1, &tex);
+    swappedTextures.clear();
     textureLoader.clearTextures();
+    boneOverrides.clear();
+    textureSwaps.clear();
+    originalJson.clear();
     errorMsg.clear();
+    selectedBoneIndex = -1;
+    boundsComputed = false;
 }
 
 GLuint SpineViewer::loadTextureFromRGBA(const unsigned char* data, int width, int height) {
@@ -284,6 +292,7 @@ bool SpineViewer::loadSkeleton(DataPack& pack, const SpineEntry& entry) {
         LogInfo("SpineViewer: SCSP data size=" + std::to_string(scspData.size()));
         jsonStr = SCSPParser::ConvertSCSPToJson(scspData);
         if (jsonStr.empty()) { errorMsg = "Failed to convert SCSP to JSON"; LogError("SpineViewer: " + errorMsg); return false; }
+        originalJson = jsonStr;
         LogInfo("SpineViewer: JSON output size=" + std::to_string(jsonStr.size()));
     } catch (const std::exception& e) {
         errorMsg = std::string("SCSP parse error: ") + e.what();
@@ -446,31 +455,95 @@ bool SpineViewer::loadSkeleton(DataPack& pack, const SpineEntry& entry) {
 void SpineViewer::computeStableBounds() {
     if (!skeleton) return;
 
-    // Use skeleton's declared dimensions, centered on origin.
-    // User can zoom to adjust. This avoids per-frame jitter.
-    cachedBoundsW = skeletonData->getWidth();
-    cachedBoundsH = skeletonData->getHeight();
-
-    // If skeleton has no declared size, sample the setup pose
-    if (cachedBoundsW <= 0 || cachedBoundsH <= 0) {
-        spine::Vector<float> vbuf;
-        float bx, by, bw, bh;
-        skeleton->getBounds(bx, by, bw, bh, vbuf);
-        if (bw > 0 && bh > 0) {
-            cachedBoundsX = bx;
-            cachedBoundsY = by;
-            cachedBoundsW = bw;
-            cachedBoundsH = bh;
-            boundsComputed = true;
-            return;
-        }
-        cachedBoundsW = 800;
-        cachedBoundsH = 800;
+    // Try actual rendered bounds from setup pose first (most accurate)
+    spine::Vector<float> vbuf;
+    float bx, by, bw, bh;
+    skeleton->getBounds(bx, by, bw, bh, vbuf);
+    if (bw > 10 && bh > 10) {
+        cachedBoundsX = bx;
+        cachedBoundsY = by;
+        cachedBoundsW = bw;
+        cachedBoundsH = bh;
+        boundsComputed = true;
+        zoom = 1.0f;
+        panX = panY = 0;
+        return;
     }
 
-    cachedBoundsX = -cachedBoundsW / 2;
-    cachedBoundsY = -cachedBoundsH / 2;
+    // Fallback to skeleton declared dimensions
+    cachedBoundsW = skeletonData->getWidth();
+    cachedBoundsH = skeletonData->getHeight();
+    if (cachedBoundsW > 10 && cachedBoundsH > 10) {
+        cachedBoundsX = -cachedBoundsW / 2;
+        cachedBoundsY = -cachedBoundsH / 2;
+        boundsComputed = true;
+        zoom = 1.0f;
+        panX = panY = 0;
+        return;
+    }
+
+    // Last resort
+    cachedBoundsW = 800;
+    cachedBoundsH = 800;
+    cachedBoundsX = -400;
+    cachedBoundsY = -400;
     boundsComputed = true;
+    zoom = 1.0f;
+    panX = panY = 0;
+}
+
+void SpineViewer::screenToWorld(float sx, float sy, int vpW, int vpH, float& wx, float& wy) {
+    float padX = cachedBoundsW * 0.1f;
+    float padY = cachedBoundsH * 0.1f;
+    float left = cachedBoundsX - padX - panX;
+    float right = cachedBoundsX + cachedBoundsW + padX - panX;
+    float bottom = cachedBoundsY - padY - panY;
+    float top = cachedBoundsY + cachedBoundsH + padY - panY;
+
+    float cx = (left + right) / 2.0f;
+    float cy = (bottom + top) / 2.0f;
+    float hw = (right - left) / (2.0f * zoom);
+    float hh = (top - bottom) / (2.0f * zoom);
+
+    // Maintain aspect ratio
+    float viewAspect = (float)vpW / vpH;
+    float boundsAspect = hw / hh;
+    if (boundsAspect > viewAspect) {
+        hh = hw / viewAspect;
+    } else {
+        hw = hh * viewAspect;
+    }
+
+    wx = cx - hw + (sx / vpW) * 2.0f * hw;
+    wy = cy + hh - (sy / vpH) * 2.0f * hh; // Y flipped
+}
+
+std::string SpineViewer::hitTestBone(float screenX, float screenY, int vpW, int vpH) {
+    if (!skeleton) return "";
+
+    float wx, wy;
+    screenToWorld(screenX, screenY, vpW, vpH, wx, wy);
+
+    auto& bones = skeleton->getBones();
+    float bestDist = 30.0f * (cachedBoundsW / (vpW * zoom)); // ~30px threshold in world units
+    std::string bestName;
+    int bestIdx = -1;
+
+    for (size_t i = 0; i < bones.size(); i++) {
+        float bx = bones[i]->getWorldX();
+        float by = bones[i]->getWorldY();
+        float dx = wx - bx;
+        float dy = wy - by;
+        float dist = sqrtf(dx * dx + dy * dy);
+        if (dist < bestDist) {
+            bestDist = dist;
+            bestName = std::string(bones[i]->getData().getName().buffer());
+            bestIdx = (int)i;
+        }
+    }
+
+    selectedBoneIndex = bestIdx;
+    return bestName;
 }
 
 void SpineViewer::update(float deltaTime) {
@@ -480,6 +553,16 @@ void SpineViewer::update(float deltaTime) {
         skeleton->setScaleY(flipY ? -1.0f : 1.0f);
         animState->update(deltaTime);
         animState->apply(*skeleton);
+
+        // Apply bone overrides on top of animation
+        for (auto& [name, ovr] : boneOverrides) {
+            spine::Bone* bone = skeleton->findBone(spine::String(name.c_str()));
+            if (bone) {
+                bone->setScaleX(ovr.scaleX);
+                bone->setScaleY(ovr.scaleY);
+            }
+        }
+
         skeleton->updateWorldTransform();
     } catch (const std::exception& e) {
         LogError("SpineViewer::update exception: " + std::string(e.what()));
@@ -731,4 +814,121 @@ void SpineViewer::setSkin(const std::string& name) {
     if (!skeleton) return;
     skeleton->setSkin(spine::String(name.c_str()));
     skeleton->setSlotsToSetupPose();
+}
+
+// ============================================================================
+// Bone editing
+// ============================================================================
+
+std::vector<SpineViewer::BoneInfo> SpineViewer::getBoneList() const {
+    std::vector<BoneInfo> list;
+    if (!skeleton) return list;
+    auto& bones = skeleton->getBones();
+    for (size_t i = 0; i < bones.size(); i++) {
+        BoneInfo bi;
+        bi.name = std::string(bones[i]->getData().getName().buffer());
+        bi.scaleX = bones[i]->getScaleX();
+        bi.scaleY = bones[i]->getScaleY();
+        bi.hasOverride = boneOverrides.count(bi.name) > 0;
+        list.push_back(bi);
+    }
+    return list;
+}
+
+void SpineViewer::setBoneScale(const std::string& boneName, float scaleX, float scaleY) {
+    boneOverrides[boneName] = { scaleX, scaleY };
+}
+
+void SpineViewer::resetBoneEdits() {
+    boneOverrides.clear();
+}
+
+// ============================================================================
+// Texture management
+// ============================================================================
+
+std::vector<SpineViewer::TextureInfo> SpineViewer::getTextureList() const {
+    std::vector<TextureInfo> list;
+    if (!atlas) return list;
+    auto& pages = atlas->getPages();
+    for (size_t i = 0; i < pages.size(); i++) {
+        TextureInfo ti;
+        ti.name = std::string(pages[i]->name.buffer());
+        ti.width = pages[i]->width;
+        ti.height = pages[i]->height;
+        ti.glId = (GLuint)(uintptr_t)pages[i]->getRendererObject();
+        list.push_back(ti);
+    }
+    return list;
+}
+
+bool SpineViewer::swapTexture(const std::string& pageName, const std::string& pngPath) {
+    if (!atlas) return false;
+
+    // Load replacement PNG
+    SDL_RWops* rw = SDL_RWFromFile(pngPath.c_str(), "rb");
+    if (!rw) { LogError("swapTexture: can't open " + pngPath); return false; }
+    SDL_Surface* surface = IMG_Load_RW(rw, 1);
+    if (!surface) { LogError("swapTexture: IMG_Load failed for " + pngPath); return false; }
+    SDL_Surface* rgba = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_ABGR8888, 0);
+    SDL_FreeSurface(surface);
+    if (!rgba) return false;
+
+    GLuint newTex = loadTextureFromRGBA((const unsigned char*)rgba->pixels, rgba->w, rgba->h);
+    int w = rgba->w, h = rgba->h;
+    SDL_FreeSurface(rgba);
+
+    if (!newTex) return false;
+    swappedTextures.push_back(newTex);
+
+    // Find the atlas page and update its renderer object
+    auto& pages = atlas->getPages();
+    for (size_t i = 0; i < pages.size(); i++) {
+        if (std::string(pages[i]->name.buffer()) == pageName) {
+            pages[i]->setRendererObject((void*)(uintptr_t)newTex);
+            pages[i]->width = w;
+            pages[i]->height = h;
+            textureSwaps[pageName] = pngPath;
+            LogInfo("swapTexture: replaced '" + pageName + "' with " + pngPath);
+            return true;
+        }
+    }
+
+    LogError("swapTexture: page '" + pageName + "' not found");
+    return false;
+}
+
+void SpineViewer::resetTextureSwaps() {
+    // Reloading the skeleton is the cleanest way to reset textures
+    textureSwaps.clear();
+}
+
+// ============================================================================
+// Export modified JSON
+// ============================================================================
+
+std::string SpineViewer::getModifiedSkeletonJson() const {
+    if (originalJson.empty()) return "";
+    if (boneOverrides.empty()) return originalJson;
+
+    try {
+        // Parse, modify bone scales, re-serialize
+        // Using nlohmann json (already included via json.hpp)
+        auto j = nlohmann::ordered_json::parse(originalJson);
+        if (j.contains("bones") && j["bones"].is_array()) {
+            for (auto& bone : j["bones"]) {
+                if (!bone.contains("name")) continue;
+                std::string name = bone["name"].get<std::string>();
+                auto it = boneOverrides.find(name);
+                if (it != boneOverrides.end()) {
+                    bone["scaleX"] = it->second.scaleX;
+                    bone["scaleY"] = it->second.scaleY;
+                }
+            }
+        }
+        return j.dump(2);
+    } catch (const std::exception& e) {
+        LogError("getModifiedSkeletonJson: " + std::string(e.what()));
+        return originalJson;
+    }
 }

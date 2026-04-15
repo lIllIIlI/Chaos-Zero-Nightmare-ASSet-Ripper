@@ -18,8 +18,10 @@ public:
     void unload(void* texture) override;
     void clearTextures();
 
-private:
     struct TexInfo { GLuint id; int width; int height; };
+    const std::map<std::string, TexInfo>& getTextures() const { return textures; }
+
+private:
     std::map<std::string, TexInfo> textures;
 };
 
@@ -56,6 +58,12 @@ private:
     bool initialized = false;
 };
 
+// Bone edit override
+struct BoneOverride {
+    float scaleX = 1.0f;
+    float scaleY = 1.0f;
+};
+
 // Main Spine viewer class
 class SpineViewer {
 public:
@@ -70,14 +78,19 @@ public:
     GLuint getFBOTexture() const { return fboTexture; }
     bool isLoaded() const { return skeleton != nullptr; }
 
+    // Animation/skin
     std::vector<std::string> getAnimationNames() const;
     std::vector<std::string> getSkinNames() const;
     void setAnimation(const std::string& name, bool loop = true);
     void setSkin(const std::string& name);
+
+    // Playback
     void setPlaybackSpeed(float speed) { playbackSpeed = speed; }
     void setPlaying(bool p) { playing = p; }
     bool isPlaying() const { return playing; }
     float getPlaybackSpeed() const { return playbackSpeed; }
+
+    // View
     void setFlipX(bool flip) { flipX = flip; }
     void setFlipY(bool flip) { flipY = flip; }
     bool getFlipX() const { return flipX; }
@@ -91,10 +104,34 @@ public:
     float getPanY() const { return panY; }
     std::string getError() const { return errorMsg; }
 
+    // Bone editing
+    struct BoneInfo { std::string name; float scaleX; float scaleY; bool hasOverride; };
+    std::vector<BoneInfo> getBoneList() const;
+    void setBoneScale(const std::string& boneName, float scaleX, float scaleY);
+    void resetBoneEdits();
+    bool hasBoneOverrides() const { return !boneOverrides.empty(); }
+    const std::map<std::string, BoneOverride>& getBoneOverrides() const { return boneOverrides; }
+
+    // Hit testing — returns bone name or empty string
+    std::string hitTestBone(float screenX, float screenY, int vpW, int vpH);
+    int selectedBoneIndex = -1;
+
+    // Texture info and swap
+    struct TextureInfo { std::string name; int width; int height; GLuint glId; };
+    std::vector<TextureInfo> getTextureList() const;
+    bool swapTexture(const std::string& pageName, const std::string& pngPath);
+    void resetTextureSwaps();
+    bool hasTextureSwaps() const { return !textureSwaps.empty(); }
+
+    // Export modified JSON
+    std::string getModifiedSkeletonJson() const;
+
 private:
     void ensureFBO(int width, int height);
     void cleanupFBO();
     GLuint loadTextureFromRGBA(const unsigned char* data, int width, int height);
+    void computeStableBounds();
+    void screenToWorld(float sx, float sy, int vpW, int vpH, float& wx, float& wy);
 
     // Spine objects
     PackTextureLoader textureLoader;
@@ -119,9 +156,19 @@ private:
     float panX = 0, panY = 0;
     std::string errorMsg;
 
-    // Cached bounds (computed once on load, not per-frame)
+    // Cached bounds
     float cachedBoundsX = 0, cachedBoundsY = 0, cachedBoundsW = 0, cachedBoundsH = 0;
     bool boundsComputed = false;
-    void computeStableBounds();
+
+    // Bone editing
+    std::map<std::string, BoneOverride> boneOverrides;
+
+    // Texture swaps (page name → replacement file path)
+    std::map<std::string, std::string> textureSwaps;
+    std::vector<GLuint> swappedTextures; // GL textures to clean up
+
+    // Original JSON for export
+    std::string originalJson;
+
     std::vector<GLuint> ownedTextures;
 };
