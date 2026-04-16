@@ -1841,12 +1841,13 @@ int main(int argc, char *argv[])
                     nk_label_colored(ctx, spine_stats.c_str(), NK_TEXT_LEFT, nk_rgb(150, 200, 255));
                     nk_layout_row_end(ctx);
 
-                    // Split: list on left, viewer on right
-                    float list_width = spine_w * 0.28f;
-                    float viewer_width = spine_w - list_width - 50.0f;
+                    // Split: list | viewport | bone editor (when editing)
+                    float list_width = spine_w * 0.22f;
+                    float editor_width = spine_edit_mode ? spine_w * 0.30f : 0;
+                    float viewer_width = spine_w - list_width - editor_width - 50.0f;
                     float panel_height = spine_h - 95.0f;
 
-                    nk_layout_row_begin(ctx, NK_STATIC, panel_height, 2);
+                    nk_layout_row_begin(ctx, NK_STATIC, panel_height, spine_edit_mode ? 3 : 2);
 
                     // Left: grouped skeleton list
                     spine_visible_indices.clear();
@@ -2166,8 +2167,7 @@ int main(int argc, char *argv[])
                             nk_layout_row_end(ctx);
 
                             // Viewport - render spine animation to FBO and display
-                            float edit_panel_h = spine_edit_mode ? 250.0f : 0.0f;
-                            float viewport_h = panel_height - 80.0f - edit_panel_h;
+                            float viewport_h = panel_height - 80.0f;
                             if (viewport_h < 100) viewport_h = 100;
                             nk_layout_row_dynamic(ctx, viewport_h, 1);
 
@@ -2218,163 +2218,6 @@ int main(int argc, char *argv[])
                                 }
                             }
 
-                            // Bone editor + texture panel (only when edit mode is on)
-                            if (spine_edit_mode) {
-                                // Header row: Scale Max + Reset + Export
-                                nk_layout_row_begin(ctx, NK_STATIC, 26, 6);
-                                nk_layout_row_push(ctx, 65);
-                                nk_label(ctx, "Scale Max:", NK_TEXT_LEFT);
-                                nk_layout_row_push(ctx, 50);
-                                nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, spine_scale_max_buf, sizeof(spine_scale_max_buf), nk_filter_float);
-                                float parsed_max = (float)atof(spine_scale_max_buf);
-                                if (parsed_max > 0) spine_scale_max = parsed_max;
-                                nk_layout_row_push(ctx, 70);
-                                if (nk_button_label(ctx, "Reset All")) {
-                                    active_spine_viewer->resetBoneEdits();
-                                    spine_selected_bone = "";
-                                }
-                                nk_layout_row_push(ctx, 100);
-                                static bool spine_export_modified_pending = false;
-                                if (nk_button_label(ctx, "Export Modified")) {
-                                    spine_export_modified_pending = true;
-                                }
-                                // Texture replace buttons
-                                auto texList = active_spine_viewer->getTextureList();
-                                for (size_t ti = 0; ti < texList.size(); ti++) {
-                                    nk_layout_row_push(ctx, 110);
-                                    std::string replBtn = "Tex: " + texList[ti].name.substr(0, 8) + "..";
-                                    if (nk_button_label(ctx, replBtn.c_str())) {
-                                        auto f = pfd::open_file("Replace " + texList[ti].name, ".", {"PNG", "*.png", "All", "*.*"});
-                                        if (!f.result().empty()) {
-                                            active_spine_viewer->swapTexture(texList[ti].name, f.result()[0]);
-                                        }
-                                    }
-                                    break; // only show first texture button in header row
-                                }
-                                nk_layout_row_end(ctx);
-
-                                // Handle deferred export (outside layout row)
-                                if (spine_export_modified_pending) {
-                                    spine_export_modified_pending = false;
-                                    try {
-                                        auto d = pfd::select_folder("Select destination folder", ".");
-                                        if (!d.result().empty()) {
-                                            std::string dest = d.result();
-                                            const auto& entry = spine_dictionary.GetEntries()[spine_selected_index];
-                                            int exported = 0;
-                                            std::string modJson = active_spine_viewer->getModifiedSkeletonJson();
-                                            if (!modJson.empty()) {
-                                                std::ofstream out(dest + "/" + entry.display_name + "_modified.json");
-                                                out << modJson; exported++;
-                                            }
-                                            if (entry.atlas_node) {
-                                                std::vector<uint8_t> ad = data_pack->GetFileData(*entry.atlas_node);
-                                                std::string as(ad.begin(), ad.end());
-                                                size_t p = 0;
-                                                while ((p = as.find(".sct", p)) != std::string::npos) { as.replace(p, 4, ".png"); p += 4; }
-                                                std::ofstream out(dest + "/" + entry.atlas_node->name, std::ios::binary);
-                                                out << as; exported++;
-                                            }
-                                            for (const auto* img : entry.image_nodes) {
-                                                const auto& fi = std::get<Core::FileInfo>(img->data);
-                                                std::vector<uint8_t> fd = data_pack->GetFileData(*img);
-                                                std::string on = img->name;
-                                                std::string el = fi.format;
-                                                std::transform(el.begin(), el.end(), el.begin(), ::tolower);
-                                                if (el == ".sct" || el == ".sct2") {
-                                                    auto png = SCTParser::ConvertToPNG(fd, false);
-                                                    if (!png.empty()) {
-                                                        size_t dp = on.find_last_of('.'); if (dp != std::string::npos) on = on.substr(0, dp);
-                                                        on += ".png";
-                                                        std::ofstream out(dest + "/" + on, std::ios::binary);
-                                                        out.write((const char*)png.data(), png.size()); exported++;
-                                                    }
-                                                } else {
-                                                    std::ofstream out(dest + "/" + on, std::ios::binary);
-                                                    out.write((const char*)fd.data(), fd.size()); exported++;
-                                                }
-                                            }
-                                            status_text = "Exported " + std::to_string(exported) + " modified files";
-                                        }
-                                    } catch (...) {}
-                                }
-
-                                // Scrollable bone list — column header
-                                nk_layout_row_begin(ctx, NK_STATIC, 18, 9);
-                                nk_layout_row_push(ctx, 120); nk_label_colored(ctx, "Bone", NK_TEXT_LEFT, nk_rgb(180, 180, 200));
-                                nk_layout_row_push(ctx, 55); nk_label_colored(ctx, "X", NK_TEXT_CENTERED, nk_rgb(140, 140, 160));
-                                nk_layout_row_push(ctx, 55); nk_label_colored(ctx, "Y", NK_TEXT_CENTERED, nk_rgb(140, 140, 160));
-                                nk_layout_row_push(ctx, 55); nk_label_colored(ctx, "Rot", NK_TEXT_CENTERED, nk_rgb(140, 140, 160));
-                                nk_layout_row_push(ctx, 55); nk_label_colored(ctx, "ScaleX", NK_TEXT_CENTERED, nk_rgb(140, 140, 160));
-                                nk_layout_row_push(ctx, 55); nk_label_colored(ctx, "ScaleY", NK_TEXT_CENTERED, nk_rgb(140, 140, 160));
-                                nk_layout_row_push(ctx, 55); nk_label_colored(ctx, "ShearX", NK_TEXT_CENTERED, nk_rgb(140, 140, 160));
-                                nk_layout_row_push(ctx, 55); nk_label_colored(ctx, "ShearY", NK_TEXT_CENTERED, nk_rgb(140, 140, 160));
-                                nk_layout_row_push(ctx, 40); nk_label(ctx, "", NK_TEXT_LEFT);
-                                nk_layout_row_end(ctx);
-
-                                // Bone rows
-                                nk_layout_row_dynamic(ctx, edit_panel_h - 55, 1);
-                                if (nk_group_begin(ctx, "BoneList", NK_WINDOW_BORDER)) {
-                                    auto bones = active_spine_viewer->getBoneList();
-                                    for (size_t bi_idx = 0; bi_idx < bones.size(); bi_idx++) {
-                                        auto& bi = bones[bi_idx];
-                                        bool is_sel = (bi.name == spine_selected_bone);
-
-                                        nk_layout_row_begin(ctx, NK_STATIC, 20, 9);
-
-                                        // Bone name button
-                                        nk_layout_row_push(ctx, 120);
-                                        struct nk_style_button bone_btn = ctx->style.button;
-                                        bone_btn.text_alignment = NK_TEXT_LEFT;
-                                        bone_btn.padding = nk_vec2(4, 1);
-                                        bone_btn.rounding = 2.0f;
-                                        bone_btn.normal = nk_style_item_color(is_sel ? nk_rgb(55, 80, 120) : nk_rgb(35, 35, 40));
-                                        bone_btn.hover = nk_style_item_color(nk_rgb(55, 65, 80));
-                                        bone_btn.text_normal = bi.hasOverride ? nk_rgb(255, 200, 80) : (is_sel ? nk_rgb(100, 200, 255) : nk_rgb(180, 180, 180));
-                                        bone_btn.text_hover = nk_rgb(255, 255, 255);
-                                        if (nk_button_label_styled(ctx, &bone_btn, bi.name.c_str())) {
-                                            spine_selected_bone = bi.name;
-                                        }
-
-                                        // Editable property fields
-                                        float vals[7] = { bi.x, bi.y, bi.rotation, bi.scaleX, bi.scaleY, bi.shearX, bi.shearY };
-                                        for (int f = 0; f < 7; f++) {
-                                            nk_layout_row_push(ctx, 55);
-                                            char buf[16];
-                                            snprintf(buf, sizeof(buf), "%.2f", vals[f]);
-                                            int len = (int)strlen(buf);
-                                            nk_edit_string(ctx, NK_EDIT_FIELD | NK_EDIT_SIG_ENTER, buf, &len, sizeof(buf) - 1, nk_filter_float);
-                                            buf[len] = '\0';
-                                            vals[f] = (float)atof(buf);
-                                        }
-
-                                        // Reset button
-                                        nk_layout_row_push(ctx, 40);
-                                        if (bi.hasOverride) {
-                                            if (nk_button_label(ctx, "Rst")) {
-                                                active_spine_viewer->resetBone(bi.name);
-                                            }
-                                        } else {
-                                            nk_spacing(ctx, 1);
-                                        }
-
-                                        nk_layout_row_end(ctx);
-
-                                        // Apply if any value changed
-                                        if (vals[0] != bi.x || vals[1] != bi.y || vals[2] != bi.rotation ||
-                                            vals[3] != bi.scaleX || vals[4] != bi.scaleY ||
-                                            vals[5] != bi.shearX || vals[6] != bi.shearY) {
-                                            BoneOverride ovr;
-                                            ovr.x = vals[0]; ovr.y = vals[1]; ovr.rotation = vals[2];
-                                            ovr.scaleX = vals[3]; ovr.scaleY = vals[4];
-                                            ovr.shearX = vals[5]; ovr.shearY = vals[6];
-                                            active_spine_viewer->setBoneOverride(bi.name, ovr);
-                                        }
-                                    }
-                                    nk_group_end(ctx);
-                                }
-                            }
-
                         } else if (active_spine_viewer && !active_spine_viewer->getError().empty()) {
                             nk_layout_row_dynamic(ctx, 30, 1);
                             nk_label_colored(ctx, "Error:", NK_TEXT_CENTERED, nk_rgb(255, 100, 100));
@@ -2385,6 +2228,163 @@ int main(int argc, char *argv[])
                             nk_label(ctx, "Select a skeleton from the list", NK_TEXT_CENTERED);
                         }
                         nk_group_end(ctx);
+                    }
+
+                    // Right side: bone/texture editor panel (third column)
+                    if (spine_edit_mode && active_spine_viewer && active_spine_viewer->isLoaded()) {
+                        nk_layout_row_push(ctx, editor_width);
+                        if (nk_group_begin(ctx, "BoneEditor", NK_WINDOW_BORDER)) {
+                            // Header buttons
+                            nk_layout_row_dynamic(ctx, 24, 3);
+                            if (nk_button_label(ctx, "Reset All")) {
+                                active_spine_viewer->resetBoneEdits();
+                                spine_selected_bone = "";
+                            }
+
+                            static bool spine_export_pending = false;
+                            if (nk_button_label(ctx, "Export Modified")) {
+                                spine_export_pending = true;
+                            }
+
+                            // Texture replace
+                            auto texList = active_spine_viewer->getTextureList();
+                            if (!texList.empty()) {
+                                std::string replBtn = "Replace Tex";
+                                if (nk_button_label(ctx, replBtn.c_str())) {
+                                    auto f = pfd::open_file("Replace " + texList[0].name, ".", {"PNG", "*.png", "All", "*.*"});
+                                    if (!f.result().empty()) {
+                                        active_spine_viewer->swapTexture(texList[0].name, f.result()[0]);
+                                    }
+                                }
+                            } else {
+                                nk_spacing(ctx, 1);
+                            }
+
+                            // Deferred export
+                            if (spine_export_pending) {
+                                spine_export_pending = false;
+                                try {
+                                    auto d = pfd::select_folder("Select destination folder", ".");
+                                    if (!d.result().empty() && spine_selected_index >= 0) {
+                                        std::string dest = d.result();
+                                        const auto& entry = spine_dictionary.GetEntries()[spine_selected_index];
+                                        int exported = 0;
+                                        std::string modJson = active_spine_viewer->getModifiedSkeletonJson();
+                                        if (!modJson.empty()) {
+                                            std::ofstream out(dest + "/" + entry.display_name + "_modified.json");
+                                            out << modJson; exported++;
+                                        }
+                                        if (entry.atlas_node) {
+                                            std::vector<uint8_t> ad = data_pack->GetFileData(*entry.atlas_node);
+                                            std::string as(ad.begin(), ad.end());
+                                            size_t p = 0;
+                                            while ((p = as.find(".sct", p)) != std::string::npos) { as.replace(p, 4, ".png"); p += 4; }
+                                            std::ofstream out(dest + "/" + entry.atlas_node->name, std::ios::binary);
+                                            out << as; exported++;
+                                        }
+                                        for (const auto* img : entry.image_nodes) {
+                                            const auto& fi = std::get<Core::FileInfo>(img->data);
+                                            std::vector<uint8_t> fd = data_pack->GetFileData(*img);
+                                            std::string on = img->name;
+                                            std::string el = fi.format;
+                                            std::transform(el.begin(), el.end(), el.begin(), ::tolower);
+                                            if (el == ".sct" || el == ".sct2") {
+                                                auto png = SCTParser::ConvertToPNG(fd, false);
+                                                if (!png.empty()) {
+                                                    size_t dp = on.find_last_of('.'); if (dp != std::string::npos) on = on.substr(0, dp);
+                                                    on += ".png";
+                                                    std::ofstream out(dest + "/" + on, std::ios::binary);
+                                                    out.write((const char*)png.data(), png.size()); exported++;
+                                                }
+                                            } else {
+                                                std::ofstream out(dest + "/" + on, std::ios::binary);
+                                                out.write((const char*)fd.data(), fd.size()); exported++;
+                                            }
+                                        }
+                                        status_text = "Exported " + std::to_string(exported) + " modified files";
+                                    }
+                                } catch (...) {}
+                            }
+
+                            // Scale max config
+                            nk_layout_row_begin(ctx, NK_STATIC, 22, 2);
+                            nk_layout_row_push(ctx, 65);
+                            nk_label(ctx, "Scale Max:", NK_TEXT_LEFT);
+                            nk_layout_row_push(ctx, 50);
+                            nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, spine_scale_max_buf, sizeof(spine_scale_max_buf), nk_filter_float);
+                            float parsed_max = (float)atof(spine_scale_max_buf);
+                            if (parsed_max > 0) spine_scale_max = parsed_max;
+                            nk_layout_row_end(ctx);
+
+                            // Bone list with all properties
+                            nk_layout_row_dynamic(ctx, panel_height - 80, 1);
+                            if (nk_group_begin(ctx, "BoneList", NK_WINDOW_BORDER)) {
+                                auto bones = active_spine_viewer->getBoneList();
+                                for (size_t bi_idx = 0; bi_idx < bones.size(); bi_idx++) {
+                                    auto& bi = bones[bi_idx];
+                                    bool is_sel = (bi.name == spine_selected_bone);
+
+                                    // Bone name + reset button
+                                    nk_layout_row_begin(ctx, NK_STATIC, 20, 2);
+                                    nk_layout_row_push(ctx, editor_width - 80);
+                                    struct nk_style_button bone_btn = ctx->style.button;
+                                    bone_btn.text_alignment = NK_TEXT_LEFT;
+                                    bone_btn.padding = nk_vec2(4, 1);
+                                    bone_btn.rounding = 2.0f;
+                                    bone_btn.normal = nk_style_item_color(is_sel ? nk_rgb(50, 70, 110) : nk_rgb(35, 35, 40));
+                                    bone_btn.hover = nk_style_item_color(nk_rgb(55, 65, 80));
+                                    bone_btn.text_normal = bi.hasOverride ? nk_rgb(255, 200, 80) : (is_sel ? nk_rgb(100, 200, 255) : nk_rgb(180, 180, 180));
+                                    bone_btn.text_hover = nk_rgb(255, 255, 255);
+                                    if (nk_button_label_styled(ctx, &bone_btn, bi.name.c_str())) {
+                                        spine_selected_bone = bi.name;
+                                    }
+                                    nk_layout_row_push(ctx, 30);
+                                    if (bi.hasOverride && nk_button_label(ctx, "R")) {
+                                        active_spine_viewer->resetBone(bi.name);
+                                    }
+                                    nk_layout_row_end(ctx);
+
+                                    // Property rows (only for selected bone to keep it clean)
+                                    if (is_sel) {
+                                        const char* labels[] = {"X", "Y", "Rot", "SclX", "SclY", "ShrX", "ShrY"};
+                                        float vals[7] = { bi.x, bi.y, bi.rotation, bi.scaleX, bi.scaleY, bi.shearX, bi.shearY };
+
+                                        for (int f = 0; f < 7; f++) {
+                                            nk_layout_row_begin(ctx, NK_STATIC, 20, 3);
+                                            nk_layout_row_push(ctx, 40);
+                                            nk_label_colored(ctx, labels[f], NK_TEXT_RIGHT, nk_rgb(140, 160, 180));
+                                            nk_layout_row_push(ctx, editor_width - 120);
+                                            nk_slider_float(ctx, -spine_scale_max, &vals[f], spine_scale_max, 0.01f);
+                                            nk_layout_row_push(ctx, 50);
+                                            char vbuf[16];
+                                            snprintf(vbuf, sizeof(vbuf), "%.2f", vals[f]);
+                                            int vlen = (int)strlen(vbuf);
+                                            nk_edit_string(ctx, NK_EDIT_FIELD | NK_EDIT_SIG_ENTER, vbuf, &vlen, sizeof(vbuf) - 1, nk_filter_float);
+                                            vbuf[vlen] = '\0';
+                                            vals[f] = (float)atof(vbuf);
+                                            nk_layout_row_end(ctx);
+                                        }
+
+                                        // Apply if changed
+                                        if (vals[0] != bi.x || vals[1] != bi.y || vals[2] != bi.rotation ||
+                                            vals[3] != bi.scaleX || vals[4] != bi.scaleY ||
+                                            vals[5] != bi.shearX || vals[6] != bi.shearY) {
+                                            BoneOverride ovr;
+                                            ovr.x = vals[0]; ovr.y = vals[1]; ovr.rotation = vals[2];
+                                            ovr.scaleX = vals[3]; ovr.scaleY = vals[4];
+                                            ovr.shearX = vals[5]; ovr.shearY = vals[6];
+                                            active_spine_viewer->setBoneOverride(bi.name, ovr);
+                                        }
+
+                                        nk_layout_row_dynamic(ctx, 3, 1);
+                                        nk_spacing(ctx, 1);
+                                    }
+                                }
+                                nk_group_end(ctx);
+                            }
+
+                            nk_group_end(ctx);
+                        }
                     }
 
                     nk_layout_row_end(ctx);
