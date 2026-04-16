@@ -551,28 +551,38 @@ void SpineViewer::update(float deltaTime) {
     try {
         skeleton->setScaleX(flipX ? -1.0f : 1.0f);
         skeleton->setScaleY(flipY ? -1.0f : 1.0f);
-        animState->update(deltaTime);
+
+        // Always advance and apply animation (even if deltaTime is 0 when paused)
+        // so that the pose is valid for override application
+        if (deltaTime > 0) {
+            animState->update(deltaTime);
+        }
         animState->apply(*skeleton);
 
         // Apply bone overrides on top of animation
-        for (auto& [name, ovr] : boneOverrides) {
-            spine::Bone* bone = skeleton->findBone(spine::String(name.c_str()));
-            if (bone) {
-                bone->setX(ovr.x);
-                bone->setY(ovr.y);
-                bone->setRotation(ovr.rotation);
-                bone->setScaleX(ovr.scaleX);
-                bone->setScaleY(ovr.scaleY);
-                bone->setShearX(ovr.shearX);
-                bone->setShearY(ovr.shearY);
-            }
-        }
+        applyBoneOverrides();
 
         skeleton->updateWorldTransform();
     } catch (const std::exception& e) {
         LogError("SpineViewer::update exception: " + std::string(e.what()));
     } catch (...) {
         LogError("SpineViewer::update unknown exception");
+    }
+}
+
+void SpineViewer::applyBoneOverrides() {
+    if (!skeleton) return;
+    for (auto& [name, ovr] : boneOverrides) {
+        spine::Bone* bone = skeleton->findBone(spine::String(name.c_str()));
+        if (bone) {
+            bone->setX(ovr.x);
+            bone->setY(ovr.y);
+            bone->setRotation(ovr.rotation);
+            bone->setScaleX(ovr.scaleX);
+            bone->setScaleY(ovr.scaleY);
+            bone->setShearX(ovr.shearX);
+            bone->setShearY(ovr.shearY);
+        }
     }
 }
 
@@ -833,14 +843,20 @@ std::vector<SpineViewer::BoneInfo> SpineViewer::getBoneList() const {
         BoneInfo bi;
         bi.name = std::string(bones[i]->getData().getName().buffer());
 
-        // Setup pose values (stable, never change during animation)
+        // Setup pose values (stable baseline from the skeleton data)
         spine::BoneData& data = bones[i]->getData();
         bi.setupX = data.getX(); bi.setupY = data.getY();
         bi.setupRot = data.getRotation();
         bi.setupSX = data.getScaleX(); bi.setupSY = data.getScaleY();
         bi.setupShX = data.getShearX(); bi.setupShY = data.getShearY();
 
-        // Effective values: override if edited, otherwise setup pose
+        // Current animated values (live, changes each frame)
+        bi.animX = bones[i]->getX(); bi.animY = bones[i]->getY();
+        bi.animRot = bones[i]->getRotation();
+        bi.animSX = bones[i]->getScaleX(); bi.animSY = bones[i]->getScaleY();
+        bi.animShX = bones[i]->getShearX(); bi.animShY = bones[i]->getShearY();
+
+        // Editable values: override if user edited, otherwise setup pose
         auto it = boneOverrides.find(bi.name);
         bi.hasOverride = (it != boneOverrides.end());
         if (bi.hasOverride) {

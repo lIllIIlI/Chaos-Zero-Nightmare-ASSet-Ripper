@@ -1800,14 +1800,18 @@ int main(int argc, char *argv[])
         // Spine Viewer Window
         if (show_spine_viewer)
         {
-            // Update spine animation
-            if (active_spine_viewer && active_spine_viewer->isLoaded() && spine_playing) {
-                Uint64 now = SDL_GetPerformanceCounter();
-                if (spine_last_tick > 0) {
-                    float dt = (float)(now - spine_last_tick) / (float)SDL_GetPerformanceFrequency();
-                    active_spine_viewer->update(dt * spine_speed);
+            // Update spine animation (always call update so overrides apply even when paused)
+            if (active_spine_viewer && active_spine_viewer->isLoaded()) {
+                float dt = 0;
+                if (spine_playing) {
+                    Uint64 now = SDL_GetPerformanceCounter();
+                    if (spine_last_tick > 0) {
+                        dt = (float)(now - spine_last_tick) / (float)SDL_GetPerformanceFrequency();
+                        dt *= spine_speed;
+                    }
+                    spine_last_tick = now;
                 }
-                spine_last_tick = now;
+                active_spine_viewer->update(dt);
             }
 
             const float spine_w = (float)window_width * 0.9f;
@@ -2348,6 +2352,12 @@ int main(int argc, char *argv[])
                                     if (is_sel) {
                                         const char* labels[] = {"X", "Y", "Rot", "SclX", "SclY", "ShrX", "ShrY"};
                                         float vals[7] = { bi.x, bi.y, bi.rotation, bi.scaleX, bi.scaleY, bi.shearX, bi.shearY };
+                                        float anim[7] = { bi.animX, bi.animY, bi.animRot, bi.animSX, bi.animSY, bi.animShX, bi.animShY };
+                                        float setup[7] = { bi.setupX, bi.setupY, bi.setupRot, bi.setupSX, bi.setupSY, bi.setupShX, bi.setupShY };
+
+                                        // Section label: Override (editable)
+                                        nk_layout_row_dynamic(ctx, 16, 1);
+                                        nk_label_colored(ctx, "Override:", NK_TEXT_LEFT, nk_rgb(255, 200, 80));
 
                                         for (int f = 0; f < 7; f++) {
                                             nk_layout_row_begin(ctx, NK_STATIC, 20, 3);
@@ -2376,7 +2386,33 @@ int main(int argc, char *argv[])
                                             active_spine_viewer->setBoneOverride(bi.name, ovr);
                                         }
 
-                                        nk_layout_row_dynamic(ctx, 3, 1);
+                                        // Animated values (read-only)
+                                        nk_layout_row_dynamic(ctx, 16, 1);
+                                        nk_label_colored(ctx, "Animated (live):", NK_TEXT_LEFT, nk_rgb(100, 180, 255));
+
+                                        nk_layout_row_begin(ctx, NK_STATIC, 16, 7);
+                                        for (int f = 0; f < 7; f++) {
+                                            nk_layout_row_push(ctx, (editor_width - 30) / 7.0f);
+                                            char abuf[24];
+                                            snprintf(abuf, sizeof(abuf), "%s:%.1f", labels[f], anim[f]);
+                                            nk_label_colored(ctx, abuf, NK_TEXT_LEFT, nk_rgb(80, 150, 220));
+                                        }
+                                        nk_layout_row_end(ctx);
+
+                                        // Setup pose values (read-only)
+                                        nk_layout_row_dynamic(ctx, 16, 1);
+                                        nk_label_colored(ctx, "Setup pose:", NK_TEXT_LEFT, nk_rgb(100, 200, 100));
+
+                                        nk_layout_row_begin(ctx, NK_STATIC, 16, 7);
+                                        for (int f = 0; f < 7; f++) {
+                                            nk_layout_row_push(ctx, (editor_width - 30) / 7.0f);
+                                            char sbuf[24];
+                                            snprintf(sbuf, sizeof(sbuf), "%s:%.1f", labels[f], setup[f]);
+                                            nk_label_colored(ctx, sbuf, NK_TEXT_LEFT, nk_rgb(80, 170, 80));
+                                        }
+                                        nk_layout_row_end(ctx);
+
+                                        nk_layout_row_dynamic(ctx, 5, 1);
                                         nk_spacing(ctx, 1);
                                     }
                                 }

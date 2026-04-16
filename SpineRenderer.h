@@ -106,11 +106,15 @@ public:
     float getPanY() const { return panY; }
     std::string getError() const { return errorMsg; }
 
-    // Bone editing — values are from setup pose (stable, not animated)
+    // Bone editing
     struct BoneInfo {
         std::string name;
-        float x, y, rotation, scaleX, scaleY, shearX, shearY; // current effective values
-        float setupX, setupY, setupRot, setupSX, setupSY, setupShX, setupShY; // original setup pose
+        // Override values (what the user edits — stable, not affected by animation)
+        float x, y, rotation, scaleX, scaleY, shearX, shearY;
+        // Original setup pose (for reset)
+        float setupX, setupY, setupRot, setupSX, setupSY, setupShX, setupShY;
+        // Current animated values (read-only, changes each frame)
+        float animX, animY, animRot, animSX, animSY, animShX, animShY;
         bool hasOverride;
     };
     std::vector<BoneInfo> getBoneList() const;
@@ -140,6 +144,7 @@ private:
     GLuint loadTextureFromRGBA(const unsigned char* data, int width, int height);
     void computeStableBounds();
     void screenToWorld(float sx, float sy, int vpW, int vpH, float& wx, float& wy);
+    void applyBoneOverrides();
 
     // Spine objects
     PackTextureLoader textureLoader;
