@@ -379,6 +379,13 @@ bool SpineViewer::loadSkeleton(DataPack& pack, const SpineEntry& entry) {
             }
         }
 
+        // Guard: atlas too small or no textures loaded — spine-cpp will crash on malformed data
+        if (atlasFixed.size() < 50 || ownedTextures.empty()) {
+            errorMsg = "Atlas too small (" + std::to_string(atlasFixed.size()) + " bytes) or no textures loaded";
+            LogError("SpineViewer: " + errorMsg);
+            return false;
+        }
+
         LogInfo("SpineViewer: creating Atlas...");
         atlas = new spine::Atlas(atlasFixed.c_str(), (int)atlasFixed.size(), "", &textureLoader, true);
         LogInfo("SpineViewer: Atlas created, pages=" + std::to_string(atlas->getPages().size())
