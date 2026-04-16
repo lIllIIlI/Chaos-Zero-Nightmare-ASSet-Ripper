@@ -35,6 +35,7 @@
 #include "SCSPParser.h"
 #include "SpineDictionary.h"
 #include "SpineRenderer.h"
+#include "Logger.h"
 #include "json.hpp"
 
 #define INITIAL_WINDOW_WIDTH 1400
