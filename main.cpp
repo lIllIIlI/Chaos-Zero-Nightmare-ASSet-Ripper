@@ -1280,8 +1280,101 @@ void draw_file_node(nk_context *ctx, const Core::FileNode &node, int depth = 0)
     }
 }
 
+// Headless CLI test: --test-spine <pack_path>
+// Scans the pack, builds spine dictionary, tries loading every skeleton, reports pass/fail.
+int run_spine_test(const std::string& pack_path_str) {
+    // Convert to wide string for DataPack
+    int sz = MultiByteToWideChar(CP_UTF8, 0, pack_path_str.c_str(), (int)pack_path_str.size(), NULL, 0);
+    std::wstring wpath(sz, 0);
+    MultiByteToWideChar(CP_UTF8, 0, pack_path_str.c_str(), (int)pack_path_str.size(), &wpath[0], sz);
+
+    LogInfo("=== SPINE TEST START ===");
+    std::cout << "Opening pack: " << pack_path_str << std::endl;
+
+    auto pack = std::make_unique<DataPack>(wpath);
+    if (pack->GetType() == DataPack::PackType::Unknown) {
+        std::cerr << "ERROR: Invalid pack file" << std::endl;
+        return 1;
+    }
+
+    std::cout << "Scanning file tree..." << std::endl;
+    std::atomic<float> progress = 0;
+    pack->Scan(progress);
+    int total_files = get_file_count(pack->GetFileTree());
+    std::cout << "Scan complete: " << total_files << " files" << std::endl;
+
+    std::cout << "Building spine dictionary..." << std::endl;
+    SpineDictionary dict;
+    dict.Build(*pack, pack->GetFileTree());
+    const auto& entries = dict.GetEntries();
+    std::cout << "Dictionary: " << entries.size() << " spine entries" << std::endl;
+
+    // Minimal SDL/GL init for texture loading (needed by SpineViewer)
+    SDL_Init(SDL_INIT_VIDEO);
+    IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_Window* win = SDL_CreateWindow("test", 0, 0, 1, 1, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
+    SDL_GLContext gl = SDL_GL_CreateContext(win);
+    glewInit();
+
+    int pass = 0, fail = 0;
+    std::vector<std::pair<std::string, std::string>> failures;
+
+    SpineViewer viewer;
+    for (size_t i = 0; i < entries.size(); i++) {
+        const auto& e = entries[i];
+        bool ok = viewer.loadSkeleton(*pack, e);
+        if (ok) {
+            // Try one frame of update+render to catch runtime crashes
+            try {
+                viewer.update(0.016f);
+                viewer.render(64, 64);
+            } catch (...) {
+                ok = false;
+            }
+            pass++;
+        } else {
+            fail++;
+            failures.push_back({e.display_name, viewer.getError()});
+        }
+        viewer.unload();
+
+        if ((i + 1) % 500 == 0 || i == entries.size() - 1) {
+            std::cout << "  " << (i+1) << "/" << entries.size()
+                      << " (pass=" << pass << " fail=" << fail << ")" << std::endl;
+        }
+    }
+
+    std::cout << "\n========== RESULTS ==========" << std::endl;
+    std::cout << "Total:  " << entries.size() << std::endl;
+    std::cout << "Pass:   " << pass << std::endl;
+    std::cout << "Fail:   " << fail << std::endl;
+
+    if (!failures.empty()) {
+        std::cout << "\nFailures:" << std::endl;
+        for (auto& [name, err] : failures) {
+            std::cout << "  " << name << ": " << err << std::endl;
+        }
+    }
+
+    LogInfo("=== SPINE TEST END: pass=" + std::to_string(pass) + " fail=" + std::to_string(fail) + " ===");
+
+    SDL_GL_DeleteContext(gl);
+    SDL_DestroyWindow(win);
+    IMG_Quit();
+    SDL_Quit();
+    return fail > 0 ? 1 : 0;
+}
+
 int main(int argc, char *argv[])
 {
+    // CLI mode: --test-spine <pack_path>
+    if (argc >= 3 && std::string(argv[1]) == "--test-spine") {
+        return run_spine_test(argv[2]);
+    }
+
     SDL_Init(SDL_INIT_VIDEO);
     IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG | IMG_INIT_WEBP);
 
