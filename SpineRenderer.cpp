@@ -206,9 +206,11 @@ void SpineBatchRenderer::flush() {
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, batchIndices.size() * sizeof(unsigned short), batchIndices.data(), GL_DYNAMIC_DRAW);
 
     glEnable(GL_BLEND);
+    // Spine uses premultiplied alpha (PMA) textures by default.
+    // PMA blend modes differ from straight alpha.
     switch (currentBlend) {
         case spine::BlendMode_Additive:
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+            glBlendFunc(GL_ONE, GL_ONE);
             break;
         case spine::BlendMode_Multiply:
             glBlendFuncSeparate(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
@@ -216,8 +218,8 @@ void SpineBatchRenderer::flush() {
         case spine::BlendMode_Screen:
             glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
             break;
-        default:
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        default: // Normal
+            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
             break;
     }
 
@@ -267,6 +269,21 @@ void SpineViewer::unload() {
 }
 
 GLuint SpineViewer::loadTextureFromRGBA(const unsigned char* data, int width, int height) {
+    // Premultiply alpha — Spine expects PMA textures for correct blending
+    // of additive effects (blush, glow, lighting, etc.)
+    size_t pixelCount = (size_t)width * height;
+    std::vector<unsigned char> pma(pixelCount * 4);
+    for (size_t i = 0; i < pixelCount; i++) {
+        unsigned char r = data[i * 4 + 0];
+        unsigned char g = data[i * 4 + 1];
+        unsigned char b = data[i * 4 + 2];
+        unsigned char a = data[i * 4 + 3];
+        pma[i * 4 + 0] = (unsigned char)((r * a) / 255);
+        pma[i * 4 + 1] = (unsigned char)((g * a) / 255);
+        pma[i * 4 + 2] = (unsigned char)((b * a) / 255);
+        pma[i * 4 + 3] = a;
+    }
+
     GLuint tex;
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
@@ -274,7 +291,7 @@ GLuint SpineViewer::loadTextureFromRGBA(const unsigned char* data, int width, in
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pma.data());
     ownedTextures.push_back(tex);
     return tex;
 }
