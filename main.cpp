@@ -1891,30 +1891,8 @@ int main(int argc, char *argv[])
             nk_end(ctx);
         }
 
-        // Spine Viewer — rendered as a fullscreen panel (not a popup)
-        if (show_spine_viewer)
-        {
-            // Update animation
-            if (active_spine_viewer && active_spine_viewer->isLoaded()) {
-                float dt = 0;
-                if (spine_playing) {
-                    Uint64 now = SDL_GetPerformanceCounter();
-                    if (spine_last_tick > 0) {
-                        dt = (float)(now - spine_last_tick) / (float)SDL_GetPerformanceFrequency();
-                        dt *= spine_speed;
-                    }
-                    spine_last_tick = now;
-                }
-                active_spine_viewer->update(dt);
-            }
-
-            if (nk_begin(ctx, "SpineViewer",
-                         nk_rect(0, 0, (float)window_width, (float)window_height),
-                         NK_WINDOW_NO_SCROLLBAR))
-            {
-                // Skip past toolbar area
-                nk_layout_row_dynamic(ctx, 72, 1);
-                nk_spacing(ctx, 1);
+        // Spine Viewer — content rendered below, inline in Main window
+        if (false) { // DISABLED — spine viewer is now rendered in the Main window below
                 if (spine_building) {
                     nk_layout_row_dynamic(ctx, 30, 1);
                     nk_label(ctx, "Building Spine dictionary...", NK_TEXT_CENTERED);
@@ -2580,6 +2558,7 @@ int main(int argc, char *argv[])
                                     bone_btn.text_hover = nk_rgb(255, 255, 255);
                                     if (nk_button_label_styled(ctx, &bone_btn, bi.name.c_str())) {
                                         spine_selected_bone = bi.name;
+                                        active_spine_viewer->selectedBoneIndex = (int)bi_idx;
                                     }
 
                                     // Hide/show toggle
@@ -2679,8 +2658,7 @@ int main(int argc, char *argv[])
                     nk_layout_row_end(ctx);
                 }
             }
-            nk_end(ctx);
-        }
+        } // end dead spine popup code
 
         if (show_atlas_window && !preview_atlas_data.empty())
         {
@@ -3544,7 +3522,200 @@ int main(int argc, char *argv[])
             }
 
             nk_layout_row_end(ctx);
-          } // end if (!show_spine_viewer)
+          } else {
+            // ====== SPINE VIEWER INLINE ======
+            // Update animation
+            if (active_spine_viewer && active_spine_viewer->isLoaded()) {
+                float dt = 0;
+                if (spine_playing) {
+                    Uint64 now = SDL_GetPerformanceCounter();
+                    if (spine_last_tick > 0) {
+                        dt = (float)(now - spine_last_tick) / (float)SDL_GetPerformanceFrequency();
+                        dt *= spine_speed;
+                    }
+                    spine_last_tick = now;
+                }
+                active_spine_viewer->update(dt);
+            }
+
+            if (spine_building) {
+                nk_layout_row_dynamic(ctx, 30, 1);
+                nk_label(ctx, "Building Spine dictionary...", NK_TEXT_CENTERED);
+            } else if (spine_dictionary.IsBuilt()) {
+                const auto& spine_entries_inline = spine_dictionary.GetEntries();
+                const auto& spine_categories_inline = spine_dictionary.GetCategories();
+
+                // Search bar
+                nk_layout_row_begin(ctx, NK_STATIC, 28, 3);
+                nk_layout_row_push(ctx, 60);
+                nk_label(ctx, "Search:", NK_TEXT_LEFT);
+                nk_layout_row_push(ctx, 250);
+                nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, spine_search_buffer, sizeof(spine_search_buffer), nk_filter_default);
+                spine_search_query = spine_search_buffer;
+                nk_layout_row_push(ctx, 200);
+                std::string sstats = std::to_string(spine_entries_inline.size()) + " skeletons";
+                nk_label_colored(ctx, sstats.c_str(), NK_TEXT_LEFT, nk_rgb(150, 200, 255));
+                nk_layout_row_end(ctx);
+
+                // Layout: list | viewport | editor
+                float sw = (float)window_width;
+                float sh = content_height - 30.0f;
+                float iListW = sw * 0.22f;
+                float iEditorW = spine_edit_mode ? sw * 0.30f : 0;
+                float iViewerW = sw - iListW - iEditorW - 50.0f;
+
+                nk_layout_row_begin(ctx, NK_STATIC, sh, spine_edit_mode ? 3 : 2);
+
+                // Skeleton list
+                spine_visible_indices.clear();
+                nk_layout_row_push(ctx, iListW);
+                if (nk_group_begin(ctx, "SpineListInline", NK_WINDOW_BORDER)) {
+                    for (const auto& cat : spine_categories_inline) {
+                        bool cat_match = spine_search_query.empty();
+                        if (!cat_match) {
+                            std::string ql = spine_search_query;
+                            std::transform(ql.begin(), ql.end(), ql.begin(), ::tolower);
+                            for (size_t idx : cat.entry_indices) {
+                                std::string dn = spine_entries_inline[idx].display_name;
+                                std::transform(dn.begin(), dn.end(), dn.begin(), ::tolower);
+                                if (dn.find(ql) != std::string::npos) { cat_match = true; break; }
+                            }
+                        }
+                        if (!cat_match) continue;
+
+                        bool expanded = spine_expanded_categories.count(cat.name) > 0;
+                        nk_layout_row_dynamic(ctx, 24, 1);
+                        struct nk_style_button cbtn = ctx->style.button;
+                        cbtn.text_alignment = NK_TEXT_LEFT;
+                        cbtn.normal = nk_style_item_color(nk_rgb(50, 55, 65));
+                        cbtn.hover = nk_style_item_color(nk_rgb(60, 65, 75));
+                        cbtn.text_normal = nk_rgb(180, 200, 230);
+                        std::string clbl = (expanded ? "- " : "+ ") + cat.name + " (" + std::to_string(cat.entry_indices.size()) + ")";
+                        if (nk_button_label_styled(ctx, &cbtn, clbl.c_str())) {
+                            if (expanded) spine_expanded_categories.erase(cat.name);
+                            else spine_expanded_categories.insert(cat.name);
+                        }
+
+                        if (!expanded && spine_search_query.empty()) continue;
+
+                        for (size_t idx : cat.entry_indices) {
+                            const auto& ent = spine_entries_inline[idx];
+                            if (!spine_search_query.empty()) {
+                                std::string dn = ent.display_name, q = spine_search_query;
+                                std::transform(dn.begin(), dn.end(), dn.begin(), ::tolower);
+                                std::transform(q.begin(), q.end(), q.begin(), ::tolower);
+                                if (dn.find(q) == std::string::npos) continue;
+                            }
+                            spine_visible_indices.push_back((int)idx);
+                            nk_layout_row_dynamic(ctx, 24, 1);
+                            bool isSel = ((int)idx == spine_selected_index);
+                            struct nk_style_button ebtn = ctx->style.button;
+                            ebtn.text_alignment = NK_TEXT_LEFT;
+                            ebtn.padding = nk_vec2(16, 3);
+                            ebtn.normal = nk_style_item_color(isSel ? nk_rgb(55, 80, 120) : nk_rgb(38, 38, 42));
+                            ebtn.hover = nk_style_item_color(nk_rgb(50, 50, 55));
+                            ebtn.text_normal = isSel ? nk_rgb(255, 255, 255) : nk_rgb(190, 190, 190);
+                            ebtn.text_hover = nk_rgb(255, 255, 255);
+                            if (nk_button_label_styled(ctx, &ebtn, ent.display_name.c_str())) {
+                                if (spine_selected_index != (int)idx) {
+                                    spine_selected_index = (int)idx;
+                                    spine_anim_selected = 0; spine_skin_selected = 0;
+                                    spine_last_tick = 0; spine_edit_mode = false;
+                                    if (!active_spine_viewer) active_spine_viewer = std::make_unique<SpineViewer>();
+                                    active_spine_viewer->loadSkeleton(*data_pack, ent);
+                                    active_spine_viewer->setFlipX(spine_flip_x);
+                                    active_spine_viewer->setFlipY(spine_flip_y);
+                                }
+                            }
+                        }
+                    }
+                    nk_group_end(ctx);
+                }
+
+                // Viewer panel
+                nk_layout_row_push(ctx, iViewerW);
+                if (nk_group_begin(ctx, "SpineViewInline", NK_WINDOW_BORDER)) {
+                    if (active_spine_viewer && active_spine_viewer->isLoaded()) {
+                        // Viewport
+                        float vpH = sh - 10.0f;
+                        nk_layout_row_dynamic(ctx, vpH, 1);
+                        struct nk_rect vb = nk_widget_bounds(ctx);
+                        int vw = (int)vb.w, vh = (int)vb.h;
+
+                        // Mouse interaction
+                        {
+                            nk_input* inp = &ctx->input;
+                            if (nk_input_is_mouse_hovering_rect(inp, vb)) {
+                                float scr = inp->mouse.scroll_delta.y;
+                                float mdx = inp->mouse.delta.x, mdy = inp->mouse.delta.y;
+                                Uint32 km = SDL_GetModState();
+
+                                if (scr != 0 && !(km & KMOD_CTRL)) {
+                                    active_spine_viewer->zoomBy(scr > 0 ? 1.15f : 1.0f/1.15f);
+                                    spine_zoom = active_spine_viewer->getZoom();
+                                }
+                                if (nk_input_is_mouse_down(inp, NK_BUTTON_MIDDLE) ||
+                                    (nk_input_is_mouse_down(inp, NK_BUTTON_LEFT) && (km & KMOD_SHIFT))) {
+                                    if (mdx != 0 || mdy != 0) {
+                                        float s = active_spine_viewer->getZoom() > 0 ? (float)vw / active_spine_viewer->getZoom() / vw : 1;
+                                        active_spine_viewer->pan(mdx * s, -mdy * s);
+                                    }
+                                }
+                                if (spine_edit_mode && !spine_selected_bone.empty() && scr != 0 && (km & KMOD_CTRL)) {
+                                    auto bl = active_spine_viewer->getBoneList();
+                                    for (auto& b : bl) { if (b.name == spine_selected_bone) {
+                                        BoneOverride o; o.x=b.x; o.y=b.y; o.rotation=b.rotation;
+                                        o.scaleX=b.scaleX+scr*0.05f; o.scaleY=b.scaleY+scr*0.05f;
+                                        o.shearX=b.shearX; o.shearY=b.shearY;
+                                        active_spine_viewer->setBoneOverride(b.name, o); break;
+                                    }}
+                                }
+                                if (spine_edit_mode) {
+                                    static SpineViewer::GizmoHandle ag = SpineViewer::GizmoHandle::None;
+                                    float lx = inp->mouse.pos.x - vb.x, ly = inp->mouse.pos.y - vb.y;
+                                    if (nk_input_is_mouse_pressed(inp, NK_BUTTON_LEFT) && !(km & KMOD_SHIFT)) {
+                                        ag = active_spine_viewer->hitTestGizmo(lx, ly, vw, vh);
+                                        if (ag == SpineViewer::GizmoHandle::None) {
+                                            spine_selected_bone = active_spine_viewer->hitTestBone(lx, ly, vw, vh);
+                                            if (!spine_selected_bone.empty()) ag = SpineViewer::GizmoHandle::Move;
+                                        }
+                                    }
+                                    if (!nk_input_is_mouse_down(inp, NK_BUTTON_LEFT)) ag = SpineViewer::GizmoHandle::None;
+                                    if (ag != SpineViewer::GizmoHandle::None && !spine_selected_bone.empty()
+                                        && nk_input_is_mouse_down(inp, NK_BUTTON_LEFT) && (mdx!=0||mdy!=0)) {
+                                        float s = active_spine_viewer->getZoom()>0?(float)vw/active_spine_viewer->getZoom()/vw:1;
+                                        auto bl = active_spine_viewer->getBoneList();
+                                        for (auto& b : bl) { if (b.name != spine_selected_bone) continue;
+                                            BoneOverride o; o.x=b.x; o.y=b.y; o.rotation=b.rotation;
+                                            o.scaleX=b.scaleX; o.scaleY=b.scaleY; o.shearX=b.shearX; o.shearY=b.shearY;
+                                            if (ag==SpineViewer::GizmoHandle::Move) { o.x+=mdx*s; o.y-=mdy*s; }
+                                            else if (ag==SpineViewer::GizmoHandle::Rotate) { o.rotation+=mdx*0.5f; }
+                                            else { o.scaleX+=mdx*0.005f; o.scaleY-=mdy*0.005f; }
+                                            active_spine_viewer->setBoneOverride(b.name, o); break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (vw > 0 && vh > 0) {
+                            active_spine_viewer->render(vw, vh);
+                            GLuint ft = active_spine_viewer->getFBOTexture();
+                            if (ft) {
+                                struct nk_image fimg = nk_image_id((int)ft);
+                                nk_draw_image(nk_window_get_canvas(ctx), vb, &fimg, nk_rgb(255,255,255));
+                            }
+                        }
+                    } else {
+                        nk_layout_row_dynamic(ctx, 30, 1);
+                        nk_label(ctx, "Select a skeleton", NK_TEXT_CENTERED);
+                    }
+                    nk_group_end(ctx);
+                }
+
+                nk_layout_row_end(ctx);
+            }
+          } // end else (show_spine_viewer)
 
             nk_layout_row_dynamic(ctx, 28, 1);
             if (selection_exists)
