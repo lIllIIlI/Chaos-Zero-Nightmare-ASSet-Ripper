@@ -2273,22 +2273,43 @@ int main(int argc, char *argv[])
                             int vpw = (int)viewport_bounds.w;
                             int vph = (int)viewport_bounds.h;
 
-                            // Mouse interaction on viewport: scroll to zoom, drag to pan, click to select bone
+                            // Mouse interaction on viewport
                             {
                                 nk_input* in = &ctx->input;
                                 bool hovering = nk_input_is_mouse_hovering_rect(in, viewport_bounds);
                                 if (hovering) {
+                                    Uint32 kmod = SDL_GetModState();
+                                    float dx = in->mouse.delta.x;
+                                    float dy = in->mouse.delta.y;
                                     float scroll = in->mouse.scroll_delta.y;
+
+                                    // Scroll wheel: zoom viewport (or scale bone if edit mode + bone selected + Ctrl)
                                     if (scroll != 0) {
-                                        float factor = (scroll > 0) ? 1.15f : (1.0f / 1.15f);
-                                        active_spine_viewer->zoomBy(factor);
-                                        spine_zoom = active_spine_viewer->getZoom();
+                                        if (spine_edit_mode && !spine_selected_bone.empty() && (kmod & KMOD_CTRL)) {
+                                            // Ctrl+scroll = scale selected bone
+                                            auto overrides = active_spine_viewer->getBoneOverrides();
+                                            auto bones = active_spine_viewer->getBoneList();
+                                            for (auto& b : bones) {
+                                                if (b.name == spine_selected_bone) {
+                                                    BoneOverride ovr;
+                                                    ovr.x = b.x; ovr.y = b.y; ovr.rotation = b.rotation;
+                                                    ovr.scaleX = b.scaleX + scroll * 0.05f;
+                                                    ovr.scaleY = b.scaleY + scroll * 0.05f;
+                                                    ovr.shearX = b.shearX; ovr.shearY = b.shearY;
+                                                    active_spine_viewer->setBoneOverride(b.name, ovr);
+                                                    break;
+                                                }
+                                            }
+                                        } else {
+                                            float factor = (scroll > 0) ? 1.15f : (1.0f / 1.15f);
+                                            active_spine_viewer->zoomBy(factor);
+                                            spine_zoom = active_spine_viewer->getZoom();
+                                        }
                                     }
 
+                                    // Middle mouse or Shift+left drag = pan viewport
                                     if (nk_input_is_mouse_down(in, NK_BUTTON_MIDDLE) ||
-                                        (nk_input_is_mouse_down(in, NK_BUTTON_LEFT) && (SDL_GetModState() & KMOD_SHIFT))) {
-                                        float dx = in->mouse.delta.x;
-                                        float dy = in->mouse.delta.y;
+                                        (nk_input_is_mouse_down(in, NK_BUTTON_LEFT) && (kmod & KMOD_SHIFT))) {
                                         if (dx != 0 || dy != 0) {
                                             float viewW = active_spine_viewer->getZoom() > 0 ? (float)vpw / active_spine_viewer->getZoom() : (float)vpw;
                                             float sc = viewW / (float)vpw;
@@ -2296,12 +2317,53 @@ int main(int argc, char *argv[])
                                         }
                                     }
 
-                                    // Click to select bone (only in edit mode, left click without shift)
-                                    if (spine_edit_mode && nk_input_is_mouse_pressed(in, NK_BUTTON_LEFT)
-                                        && !(SDL_GetModState() & KMOD_SHIFT)) {
-                                        float localX = in->mouse.pos.x - viewport_bounds.x;
-                                        float localY = in->mouse.pos.y - viewport_bounds.y;
-                                        spine_selected_bone = active_spine_viewer->hitTestBone(localX, localY, vpw, vph);
+                                    // Edit mode interactions
+                                    if (spine_edit_mode) {
+                                        // Left click = select bone
+                                        if (nk_input_is_mouse_pressed(in, NK_BUTTON_LEFT) && !(kmod & (KMOD_SHIFT | KMOD_CTRL))) {
+                                            float localX = in->mouse.pos.x - viewport_bounds.x;
+                                            float localY = in->mouse.pos.y - viewport_bounds.y;
+                                            spine_selected_bone = active_spine_viewer->hitTestBone(localX, localY, vpw, vph);
+                                        }
+
+                                        // Left drag (no modifier) on selected bone = move bone
+                                        if (!spine_selected_bone.empty() && nk_input_is_mouse_down(in, NK_BUTTON_LEFT)
+                                            && !(kmod & (KMOD_SHIFT | KMOD_CTRL | KMOD_ALT))
+                                            && (dx != 0 || dy != 0)) {
+                                            // Convert pixel delta to world units
+                                            float viewW = active_spine_viewer->getZoom() > 0 ? (float)vpw / active_spine_viewer->getZoom() : (float)vpw;
+                                            float sc = viewW / (float)vpw;
+                                            auto bones = active_spine_viewer->getBoneList();
+                                            for (auto& b : bones) {
+                                                if (b.name == spine_selected_bone) {
+                                                    BoneOverride ovr;
+                                                    ovr.x = b.x + dx * sc;
+                                                    ovr.y = b.y - dy * sc; // Y is inverted
+                                                    ovr.rotation = b.rotation;
+                                                    ovr.scaleX = b.scaleX; ovr.scaleY = b.scaleY;
+                                                    ovr.shearX = b.shearX; ovr.shearY = b.shearY;
+                                                    active_spine_viewer->setBoneOverride(b.name, ovr);
+                                                    break;
+                                                }
+                                            }
+                                        }
+
+                                        // Right drag on selected bone = rotate bone
+                                        if (!spine_selected_bone.empty() && nk_input_is_mouse_down(in, NK_BUTTON_RIGHT)
+                                            && (dx != 0 || dy != 0)) {
+                                            auto bones = active_spine_viewer->getBoneList();
+                                            for (auto& b : bones) {
+                                                if (b.name == spine_selected_bone) {
+                                                    BoneOverride ovr;
+                                                    ovr.x = b.x; ovr.y = b.y;
+                                                    ovr.rotation = b.rotation + dx * 0.5f;
+                                                    ovr.scaleX = b.scaleX; ovr.scaleY = b.scaleY;
+                                                    ovr.shearX = b.shearX; ovr.shearY = b.shearY;
+                                                    active_spine_viewer->setBoneOverride(b.name, ovr);
+                                                    break;
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -2471,28 +2533,18 @@ int main(int argc, char *argv[])
                                             nk_label_colored(ctx, "Override (editable):", NK_TEXT_LEFT, nk_rgb(255, 200, 80));
 
                                             float vals[7] = { bi.x, bi.y, bi.rotation, bi.scaleX, bi.scaleY, bi.shearX, bi.shearY };
+                                            // Step sizes: position=1, rotation=1, scale=0.05, shear=0.5
+                                            float steps[7] = { 1.0f, 1.0f, 1.0f, 0.05f, 0.05f, 0.5f, 0.5f };
+                                            float pxStep[7] = { 0.5f, 0.5f, 0.5f, 0.01f, 0.01f, 0.1f, 0.1f };
                                             for (int f = 0; f < 7; f++) {
-                                                // Auto-range: slider range adapts to the bone's actual value
-                                                float absVal = fabsf(vals[f]);
-                                                float absSetup = fabsf(setup[f]);
-                                                float absAnim = fabsf(anim[f]);
-                                                float autoMax = fmaxf(fmaxf(absVal, absSetup), absAnim);
-                                                autoMax = fmaxf(autoMax * 2.0f, 10.0f); // 2x headroom, min 10
-                                                float sliderMin = -autoMax;
-                                                float sliderMax = autoMax;
+                                                float absMax = fmaxf(fmaxf(fabsf(vals[f]), fabsf(setup[f])), fabsf(anim[f]));
+                                                float range = fmaxf(absMax * 3.0f, 10.0f);
 
-                                                nk_layout_row_begin(ctx, NK_STATIC, 20, 3);
-                                                nk_layout_row_push(ctx, 40);
-                                                nk_label_colored(ctx, labels[f], NK_TEXT_RIGHT, nk_rgb(140, 160, 180));
-                                                nk_layout_row_push(ctx, editor_width - 120);
-                                                nk_slider_float(ctx, sliderMin, &vals[f], sliderMax, 0.01f);
-                                                nk_layout_row_push(ctx, 50);
-                                                char vbuf[16];
-                                                snprintf(vbuf, sizeof(vbuf), "%.2f", vals[f]);
-                                                int vlen = (int)strlen(vbuf);
-                                                nk_edit_string(ctx, NK_EDIT_FIELD | NK_EDIT_SIG_ENTER, vbuf, &vlen, sizeof(vbuf) - 1, nk_filter_float);
-                                                vbuf[vlen] = '\0';
-                                                vals[f] = (float)atof(vbuf);
+                                                nk_layout_row_begin(ctx, NK_STATIC, 22, 1);
+                                                nk_layout_row_push(ctx, editor_width - 35);
+                                                // nk_property_float: label, min, val, max, step, per-pixel-step
+                                                // Has built-in +/- buttons, click-to-type, and drag
+                                                vals[f] = nk_propertyf(ctx, labels[f], -range, vals[f], range, steps[f], pxStep[f]);
                                                 nk_layout_row_end(ctx);
                                             }
 
