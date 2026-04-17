@@ -34,7 +34,7 @@ public:
 
     void init();
     void dispose();
-    void begin(float projMatrix[16]);
+    void begin(float projMatrix[16], bool pma = true);
     void addTriangles(GLuint texture, const float* vertices, int vertexCount,
                       const unsigned short* indices, int indexCount,
                       spine::BlendMode blendMode);
@@ -56,6 +56,7 @@ private:
     GLuint currentTexture = 0;
     spine::BlendMode currentBlend = spine::BlendMode_Normal;
     float currentProj[16] = {};
+    bool currentPMA = true;
     bool initialized = false;
 };
 
@@ -96,6 +97,19 @@ public:
     // View
     void setFlipX(bool flip) { flipX = flip; }
     void setFlipY(bool flip) { flipY = flip; }
+
+    // Blend config
+    void setUsePMA(bool pma) { usePMA = pma; }
+    bool getUsePMA() const { return usePMA; }
+    void setPremultiplyTextures(bool pm) { premultiplyTextures = pm; reloadTextures = true; }
+    bool getPremultiplyTextures() const { return premultiplyTextures; }
+    bool needsTextureReload() const { return reloadTextures; }
+
+    // Autoplay
+    void nextAnimation();
+    int getCurrentAnimIndex() const { return currentAnimIndex; }
+    void setAutoplayNext(bool a) { autoplayNext = a; }
+    bool getAutoplayNext() const { return autoplayNext; }
     bool getFlipX() const { return flipX; }
     bool getFlipY() const { return flipY; }
     void setZoom(float z) { zoom = z; if (zoom < 0.1f) zoom = 0.1f; if (zoom > 10.0f) zoom = 10.0f; }
@@ -171,6 +185,11 @@ private:
     bool flipY = false;
     float zoom = 1.0f;
     float panX = 0, panY = 0;
+    bool usePMA = true;
+    bool premultiplyTextures = true;
+    bool reloadTextures = false;
+    bool autoplayNext = false;
+    int currentAnimIndex = 0;
     std::string errorMsg;
 
     // Cached bounds

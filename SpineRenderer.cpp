@@ -151,8 +151,9 @@ void SpineBatchRenderer::dispose() {
     initialized = false;
 }
 
-void SpineBatchRenderer::begin(float proj[16]) {
+void SpineBatchRenderer::begin(float proj[16], bool pma) {
     memcpy(currentProj, proj, sizeof(float) * 16);
+    currentPMA = pma;
     batchVertices.clear();
     batchIndices.clear();
     currentTexture = 0;
@@ -206,20 +207,20 @@ void SpineBatchRenderer::flush() {
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, batchIndices.size() * sizeof(unsigned short), batchIndices.data(), GL_DYNAMIC_DRAW);
 
     glEnable(GL_BLEND);
-    // PMA blend modes — textures are premultiplied, so source factor is GL_ONE
-    switch (currentBlend) {
-        case spine::BlendMode_Additive:
-            glBlendFunc(GL_ONE, GL_ONE);
-            break;
-        case spine::BlendMode_Multiply:
-            glBlendFuncSeparate(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-            break;
-        case spine::BlendMode_Screen:
-            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
-            break;
-        default: // Normal PMA
-            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-            break;
+    if (currentPMA) {
+        switch (currentBlend) {
+            case spine::BlendMode_Additive: glBlendFunc(GL_ONE, GL_ONE); break;
+            case spine::BlendMode_Multiply: glBlendFuncSeparate(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA); break;
+            case spine::BlendMode_Screen: glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR); break;
+            default: glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); break;
+        }
+    } else {
+        switch (currentBlend) {
+            case spine::BlendMode_Additive: glBlendFunc(GL_SRC_ALPHA, GL_ONE); break;
+            case spine::BlendMode_Multiply: glBlendFuncSeparate(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA); break;
+            case spine::BlendMode_Screen: glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR); break;
+            default: glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA); break;
+        }
     }
 
     glDrawElements(GL_TRIANGLES, (GLsizei)batchIndices.size(), GL_UNSIGNED_SHORT, 0);
@@ -276,20 +277,20 @@ GLuint SpineViewer::loadTextureFromRGBA(const unsigned char* data, int width, in
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    // Premultiply alpha in texture data.
-    // This prevents dark fringe when GL_LINEAR samples between opaque and transparent
-    // pixels in the atlas. With straight alpha, interpolating (R,G,B,255) with (0,0,0,0)
-    // produces dark edges. With PMA, the blend is correct.
-    size_t pixelCount = (size_t)width * height;
-    std::vector<unsigned char> pma(pixelCount * 4);
-    for (size_t i = 0; i < pixelCount; i++) {
-        unsigned int a = data[i * 4 + 3];
-        pma[i * 4 + 0] = (unsigned char)((data[i * 4 + 0] * a + 127) / 255);
-        pma[i * 4 + 1] = (unsigned char)((data[i * 4 + 1] * a + 127) / 255);
-        pma[i * 4 + 2] = (unsigned char)((data[i * 4 + 2] * a + 127) / 255);
-        pma[i * 4 + 3] = (unsigned char)a;
+    if (premultiplyTextures) {
+        size_t pixelCount = (size_t)width * height;
+        std::vector<unsigned char> pma(pixelCount * 4);
+        for (size_t i = 0; i < pixelCount; i++) {
+            unsigned int a = data[i * 4 + 3];
+            pma[i * 4 + 0] = (unsigned char)((data[i * 4 + 0] * a + 127) / 255);
+            pma[i * 4 + 1] = (unsigned char)((data[i * 4 + 1] * a + 127) / 255);
+            pma[i * 4 + 2] = (unsigned char)((data[i * 4 + 2] * a + 127) / 255);
+            pma[i * 4 + 3] = (unsigned char)a;
+        }
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pma.data());
+    } else {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
     }
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pma.data());
     ownedTextures.push_back(tex);
     return tex;
 }
@@ -581,6 +582,14 @@ void SpineViewer::update(float deltaTime) {
         }
         animState->apply(*skeleton);
 
+        // Autoplay: advance to next animation when current one completes
+        if (autoplayNext && deltaTime > 0) {
+            spine::TrackEntry* track = animState->getCurrent(0);
+            if (track && !track->getLoop() && track->isComplete()) {
+                nextAnimation();
+            }
+        }
+
         // Apply bone overrides on top of animation
         applyBoneOverrides();
 
@@ -679,7 +688,7 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
     proj[13] = (top + bottom) / (top - bottom);  // sign flipped
     proj[15] = 1.0f;
 
-    batchRenderer.begin(proj);
+    batchRenderer.begin(proj, usePMA);
 
     // Render slots in draw order
     try {
@@ -723,9 +732,10 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
 
             spine::Color attachColor = region->getColor();
             float a = tintA * attachColor.a;
-            float r = tintR * attachColor.r * a;
-            float g = tintG * attachColor.g * a;
-            float b = tintB * attachColor.b * a;
+            float pm = usePMA ? a : 1.0f;
+            float r = tintR * attachColor.r * pm;
+            float g = tintG * attachColor.g * pm;
+            float b = tintB * attachColor.b * pm;
 
             for (int j = 0; j < 4; j++) {
                 regionVerts[j * 8 + 0] = worldVertices[j * 2 + 0];
@@ -849,8 +859,24 @@ std::vector<std::string> SpineViewer::getSkinNames() const {
 }
 
 void SpineViewer::setAnimation(const std::string& name, bool loop) {
-    if (!animState) return;
+    if (!animState || !skeletonData) return;
     animState->setAnimation(0, spine::String(name.c_str()), loop);
+    // Track current index for autoplay
+    auto& anims = skeletonData->getAnimations();
+    for (size_t i = 0; i < anims.size(); i++) {
+        if (std::string(anims[i]->getName().buffer()) == name) {
+            currentAnimIndex = (int)i;
+            break;
+        }
+    }
+}
+
+void SpineViewer::nextAnimation() {
+    if (!animState || !skeletonData) return;
+    auto& anims = skeletonData->getAnimations();
+    if (anims.size() == 0) return;
+    currentAnimIndex = (currentAnimIndex + 1) % (int)anims.size();
+    animState->setAnimation(0, anims[currentAnimIndex]->getName(), !autoplayNext);
 }
 
 void SpineViewer::setSkin(const std::string& name) {

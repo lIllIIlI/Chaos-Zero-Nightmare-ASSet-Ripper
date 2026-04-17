@@ -2061,6 +2061,7 @@ int main(int argc, char *argv[])
                             nk_layout_row_push(ctx, 160);
                             auto anim_names = active_spine_viewer->getAnimationNames();
                             if (!anim_names.empty()) {
+                                spine_anim_selected = active_spine_viewer->getCurrentAnimIndex();
                                 if (spine_anim_selected >= (int)anim_names.size()) spine_anim_selected = 0;
                                 if (nk_combo_begin_label(ctx, anim_names[spine_anim_selected].c_str(), nk_vec2(200, 300))) {
                                     nk_layout_row_dynamic(ctx, 22, 1);
@@ -2264,8 +2265,60 @@ int main(int argc, char *argv[])
 
                             nk_layout_row_end(ctx);
 
+                            // Autoplay + blend config row
+                            static bool spine_autoplay = false;
+                            static bool spine_pma_blend = true;
+                            static bool spine_pma_tex = true;
+                            nk_layout_row_begin(ctx, NK_STATIC, 24, 5);
+
+                            // Autoplay next
+                            nk_layout_row_push(ctx, 80);
+                            {
+                                struct nk_style_button ab = ctx->style.button;
+                                ab.rounding = 3.0f;
+                                ab.normal = nk_style_item_color(spine_autoplay ? nk_rgb(56, 120, 74) : nk_rgb(60, 60, 65));
+                                ab.hover = nk_style_item_color(spine_autoplay ? nk_rgb(66, 138, 86) : nk_rgb(75, 75, 80));
+                                ab.text_normal = nk_rgb(220, 220, 220);
+                                if (nk_button_label_styled(ctx, &ab, spine_autoplay ? "Auto: ON" : "Auto: OFF")) {
+                                    spine_autoplay = !spine_autoplay;
+                                    active_spine_viewer->setAutoplayNext(spine_autoplay);
+                                }
+                            }
+
+                            // Next animation button
+                            nk_layout_row_push(ctx, 50);
+                            if (nk_button_label(ctx, "Next")) {
+                                active_spine_viewer->nextAnimation();
+                                spine_anim_selected = active_spine_viewer->getCurrentAnimIndex();
+                            }
+
+                            nk_layout_row_push(ctx, 20);
+                            nk_spacing(ctx, 1);
+
+                            // PMA blend toggle
+                            nk_layout_row_push(ctx, 80);
+                            {
+                                struct nk_style_button pb = ctx->style.button;
+                                pb.rounding = 3.0f;
+                                pb.normal = nk_style_item_color(spine_pma_blend ? nk_rgb(70, 90, 120) : nk_rgb(60, 60, 65));
+                                pb.hover = nk_style_item_color(nk_rgb(80, 100, 130));
+                                pb.text_normal = nk_rgb(200, 200, 200);
+                                if (nk_button_label_styled(ctx, &pb, spine_pma_blend ? "PMA: ON" : "PMA: OFF")) {
+                                    spine_pma_blend = !spine_pma_blend;
+                                    spine_pma_tex = spine_pma_blend;
+                                    active_spine_viewer->setUsePMA(spine_pma_blend);
+                                    active_spine_viewer->setPremultiplyTextures(spine_pma_tex);
+                                    // Reload skeleton to re-upload textures with new PMA setting
+                                    if (spine_selected_index >= 0 && spine_selected_index < (int)spine_entries.size()) {
+                                        active_spine_viewer->loadSkeleton(*data_pack, spine_entries[spine_selected_index]);
+                                    }
+                                }
+                            }
+
+                            nk_layout_row_end(ctx);
+
                             // Viewport - render spine animation to FBO and display
-                            float viewport_h = panel_height - 80.0f;
+                            float viewport_h = panel_height - 108.0f;
                             if (viewport_h < 100) viewport_h = 100;
                             nk_layout_row_dynamic(ctx, viewport_h, 1);
 
