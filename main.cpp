@@ -4069,11 +4069,26 @@ int main(int argc, char *argv[])
                         nk_style_push_vec2(ctx, &ctx->style.window.spacing, nk_vec2(2, 0));
                         nk_style_push_vec2(ctx, &ctx->style.window.group_padding, nk_vec2(2, 2));
                         if (nk_group_begin(ctx, "BoneList", NK_WINDOW_BORDER)) {
+                            // Bone search
+                            static char bone_search_buf[128] = {0};
+                            nk_layout_row_dynamic(ctx, 18, 1);
+                            nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, bone_search_buf, sizeof(bone_search_buf), nk_filter_default);
+                            std::string bone_query = bone_search_buf;
+                            std::transform(bone_query.begin(), bone_query.end(), bone_query.begin(), ::tolower);
+
                             auto bones = active_spine_viewer->getBoneList();
                             float scroll_target_y = -1;
 
                             for (size_t bi_idx = 0; bi_idx < bones.size(); bi_idx++) {
                                 auto& bi = bones[bi_idx];
+
+                                // Filter by search
+                                if (!bone_query.empty()) {
+                                    std::string lower_name = bi.name;
+                                    std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+                                    if (lower_name.find(bone_query) == std::string::npos) continue;
+                                }
+
                                 bool is_sel = (bi.name == spine_selected_bone);
 
                                 // Track widget Y position for auto-scroll
