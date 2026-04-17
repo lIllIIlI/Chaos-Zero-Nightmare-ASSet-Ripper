@@ -1891,8 +1891,7 @@ int main(int argc, char *argv[])
             nk_end(ctx);
         }
 
-        // Spine Viewer — content rendered below, inline in Main window
-        if (false) { // DISABLED — spine viewer is now rendered in the Main window below
+        #if 0 // Dead code — old spine viewer popup, now inline in Main window
                 if (spine_building) {
                     nk_layout_row_dynamic(ctx, 30, 1);
                     nk_label(ctx, "Building Spine dictionary...", NK_TEXT_CENTERED);
@@ -2658,7 +2657,7 @@ int main(int argc, char *argv[])
                     nk_layout_row_end(ctx);
                 }
             }
-        } // end dead spine popup code
+        #endif // end dead spine popup code
 
         if (show_atlas_window && !preview_atlas_data.empty())
         {
