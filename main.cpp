@@ -4129,77 +4129,55 @@ int main(int argc, char *argv[])
                                 }
 
                                 if (is_sel) {
-                                    const char* labels[] = {"X", "Y", "Rot", "SclX", "SclY", "ShrX", "ShrY"};
-                                    float anim[7] = { bi.animX, bi.animY, bi.animRot, bi.animSX, bi.animSY, bi.animShX, bi.animShY };
-                                    float setup[7] = { bi.setupX, bi.setupY, bi.setupRot, bi.setupSX, bi.setupSY, bi.setupShX, bi.setupShY };
-
-                                    if (bi.hasOverride) {
-                                        static bool spine_link_scale = true;
-                                        nk_layout_row_dynamic(ctx, 16, 2);
-                                        nk_label_colored(ctx, "Override:", NK_TEXT_LEFT, nk_rgb(255, 200, 80));
-                                        {
-                                            struct nk_style_button lb = ctx->style.button;
-                                            lb.rounding = 1.0f;
-                                            lb.padding = nk_vec2(2, 0);
-                                            lb.border = 0;
-                                            lb.normal = nk_style_item_color(spine_link_scale ? nk_rgb(56, 120, 74) : nk_rgb(60, 60, 65));
-                                            lb.hover = nk_style_item_color(spine_link_scale ? nk_rgb(66, 138, 86) : nk_rgb(75, 75, 80));
-                                            lb.text_normal = nk_rgb(200, 200, 200);
-                                            if (nk_button_label_styled(ctx, &lb, spine_link_scale ? "Scale: Linked" : "Scale: Free")) {
-                                                spine_link_scale = !spine_link_scale;
-                                            }
-                                        }
-
-                                        float vals[7] = { bi.x, bi.y, bi.rotation, bi.scaleX, bi.scaleY, bi.shearX, bi.shearY };
-                                        float oldSclX = vals[3], oldSclY = vals[4];
-                                        float steps[7] = { 1.0f, 1.0f, 1.0f, 0.05f, 0.05f, 0.5f, 0.5f };
-                                        float pxStep[7] = { 0.5f, 0.5f, 0.5f, 0.01f, 0.01f, 0.1f, 0.1f };
-                                        for (int f = 0; f < 7; f++) {
-                                            float absMax = fmaxf(fmaxf(fabsf(vals[f]), fabsf(setup[f])), fabsf(anim[f]));
-                                            float range = fmaxf(absMax * 3.0f, 10.0f);
-                                            nk_layout_row_dynamic(ctx, 18, 1);
-                                            vals[f] = nk_propertyf(ctx, labels[f], -range, vals[f], range, steps[f], pxStep[f]);
-                                        }
-
-                                        if (spine_link_scale) {
-                                            float dsx = vals[3] - oldSclX, dsy = vals[4] - oldSclY;
-                                            if (dsx != 0 && dsy == 0) vals[4] += dsx;
-                                            if (dsy != 0 && dsx == 0) vals[3] += dsy;
-                                        }
-
+                                    // Auto-create override from setup pose if not already editing
+                                    if (!bi.hasOverride) {
                                         BoneOverride ovr;
-                                        ovr.x = vals[0]; ovr.y = vals[1]; ovr.rotation = vals[2];
-                                        ovr.scaleX = vals[3]; ovr.scaleY = vals[4];
-                                        ovr.shearX = vals[5]; ovr.shearY = vals[6];
+                                        ovr.x = bi.setupX; ovr.y = bi.setupY; ovr.rotation = bi.setupRot;
+                                        ovr.scaleX = bi.setupSX; ovr.scaleY = bi.setupSY;
+                                        ovr.shearX = bi.setupShX; ovr.shearY = bi.setupShY;
                                         active_spine_viewer->setBoneOverride(bi.name, ovr);
-                                    } else {
-                                        nk_layout_row_dynamic(ctx, 18, 1);
-                                        if (nk_button_label(ctx, "Start Editing This Bone")) {
-                                            BoneOverride ovr;
-                                            ovr.x = bi.setupX; ovr.y = bi.setupY; ovr.rotation = bi.setupRot;
-                                            ovr.scaleX = bi.setupSX; ovr.scaleY = bi.setupSY;
-                                            ovr.shearX = bi.setupShX; ovr.shearY = bi.setupShY;
-                                            active_spine_viewer->setBoneOverride(bi.name, ovr);
+                                    }
+
+                                    const char* labels[] = {"X", "Y", "Rot", "SclX", "SclY", "ShrX", "ShrY"};
+
+                                    static bool spine_link_scale = true;
+                                    nk_layout_row_dynamic(ctx, 16, 2);
+                                    nk_label_colored(ctx, bi.hasOverride ? "Editing:" : "Selected:", NK_TEXT_LEFT, nk_rgb(255, 200, 80));
+                                    {
+                                        struct nk_style_button lb = ctx->style.button;
+                                        lb.rounding = 1.0f;
+                                        lb.padding = nk_vec2(2, 0);
+                                        lb.border = 0;
+                                        lb.normal = nk_style_item_color(spine_link_scale ? nk_rgb(56, 120, 74) : nk_rgb(60, 60, 65));
+                                        lb.hover = nk_style_item_color(spine_link_scale ? nk_rgb(66, 138, 86) : nk_rgb(75, 75, 80));
+                                        lb.text_normal = nk_rgb(200, 200, 200);
+                                        if (nk_button_label_styled(ctx, &lb, spine_link_scale ? "Scale: Linked" : "Scale: Free")) {
+                                            spine_link_scale = !spine_link_scale;
                                         }
                                     }
 
-                                    nk_layout_row_dynamic(ctx, 13, 1);
-                                    nk_label_colored(ctx, "Animated:", NK_TEXT_LEFT, nk_rgb(100, 180, 255));
-                                    nk_layout_row_dynamic(ctx, 13, 7);
+                                    float vals[7] = { bi.x, bi.y, bi.rotation, bi.scaleX, bi.scaleY, bi.shearX, bi.shearY };
+                                    float oldSclX = vals[3], oldSclY = vals[4];
+                                    float steps[7] = { 1.0f, 1.0f, 1.0f, 0.05f, 0.05f, 0.5f, 0.5f };
+                                    float pxStep[7] = { 0.5f, 0.5f, 0.5f, 0.01f, 0.01f, 0.1f, 0.1f };
+                                    float setup[7] = { bi.setupX, bi.setupY, bi.setupRot, bi.setupSX, bi.setupSY, bi.setupShX, bi.setupShY };
                                     for (int f = 0; f < 7; f++) {
-                                        char abuf[24];
-                                        snprintf(abuf, sizeof(abuf), "%s:%.1f", labels[f], anim[f]);
-                                        nk_label_colored(ctx, abuf, NK_TEXT_LEFT, nk_rgb(80, 150, 220));
+                                        float range = fmaxf(fmaxf(fabsf(vals[f]), fabsf(setup[f])) * 3.0f, 10.0f);
+                                        nk_layout_row_dynamic(ctx, 18, 1);
+                                        vals[f] = nk_propertyf(ctx, labels[f], -range, vals[f], range, steps[f], pxStep[f]);
                                     }
 
-                                    nk_layout_row_dynamic(ctx, 13, 1);
-                                    nk_label_colored(ctx, "Setup:", NK_TEXT_LEFT, nk_rgb(100, 200, 100));
-                                    nk_layout_row_dynamic(ctx, 13, 7);
-                                    for (int f = 0; f < 7; f++) {
-                                        char sbuf[24];
-                                        snprintf(sbuf, sizeof(sbuf), "%s:%.1f", labels[f], setup[f]);
-                                        nk_label_colored(ctx, sbuf, NK_TEXT_LEFT, nk_rgb(80, 170, 80));
+                                    if (spine_link_scale) {
+                                        float dsx = vals[3] - oldSclX, dsy = vals[4] - oldSclY;
+                                        if (dsx != 0 && dsy == 0) vals[4] += dsx;
+                                        if (dsy != 0 && dsx == 0) vals[3] += dsy;
                                     }
+
+                                    BoneOverride ovr;
+                                    ovr.x = vals[0]; ovr.y = vals[1]; ovr.rotation = vals[2];
+                                    ovr.scaleX = vals[3]; ovr.scaleY = vals[4];
+                                    ovr.shearX = vals[5]; ovr.shearY = vals[6];
+                                    active_spine_viewer->setBoneOverride(bi.name, ovr);
 
                                     nk_layout_row_dynamic(ctx, 2, 1);
                                     nk_spacing(ctx, 1);
