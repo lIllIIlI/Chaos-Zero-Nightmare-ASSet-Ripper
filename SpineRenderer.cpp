@@ -718,10 +718,10 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
             spine::Vector<float>& uvs = region->getUVs();
 
             spine::Color attachColor = region->getColor();
-            float r = tintR * attachColor.r;
-            float g = tintG * attachColor.g;
-            float b = tintB * attachColor.b;
             float a = tintA * attachColor.a;
+            float r = tintR * attachColor.r * a; // PMA: premultiply vertex color
+            float g = tintG * attachColor.g * a;
+            float b = tintB * attachColor.b * a;
 
             for (int j = 0; j < 4; j++) {
                 regionVerts[j * 8 + 0] = worldVertices[j * 2 + 0];
@@ -752,10 +752,10 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
             mesh->computeWorldVertices(*slot, 0, mesh->getWorldVerticesLength(), worldVertices, 0, 2);
 
             spine::Color attachColor = mesh->getColor();
-            float r = tintR * attachColor.r;
-            float g = tintG * attachColor.g;
-            float b = tintB * attachColor.b;
             float a = tintA * attachColor.a;
+            float r = tintR * attachColor.r * a; // PMA: premultiply vertex color
+            float g = tintG * attachColor.g * a;
+            float b = tintB * attachColor.b * a;
 
             // Build interleaved vertex data
             static std::vector<float> meshVerts;
