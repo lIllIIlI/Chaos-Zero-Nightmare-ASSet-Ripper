@@ -3860,9 +3860,10 @@ int main(int argc, char *argv[])
                             pb.text_normal = nk_rgb(200, 200, 200);
                             if (nk_button_label_styled(ctx, &pb, spine_pma_blend ? "PMA: ON" : "PMA: OFF")) {
                                 spine_pma_blend = !spine_pma_blend;
-                                spine_pma_tex = spine_pma_blend;
+                                // Source textures from ASTC are already premultiplied —
+                                // never re-premultiply, just toggle the blend mode
                                 active_spine_viewer->setUsePMA(spine_pma_blend);
-                                active_spine_viewer->setPremultiplyTextures(spine_pma_tex);
+                                active_spine_viewer->setPremultiplyTextures(false);
                                 if (spine_selected_index >= 0 && spine_selected_index < (int)spine_entries_inline.size()) {
                                     active_spine_viewer->loadSkeleton(*data_pack, spine_entries_inline[spine_selected_index]);
                                 }
