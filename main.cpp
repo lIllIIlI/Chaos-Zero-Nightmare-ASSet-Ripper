@@ -1891,10 +1891,10 @@ int main(int argc, char *argv[])
             nk_end(ctx);
         }
 
-        // Spine Viewer Window
+        // Spine Viewer — rendered as a fullscreen panel (not a popup)
         if (show_spine_viewer)
         {
-            // Update spine animation (always call update so overrides apply even when paused)
+            // Update animation
             if (active_spine_viewer && active_spine_viewer->isLoaded()) {
                 float dt = 0;
                 if (spine_playing) {
@@ -1908,15 +1908,13 @@ int main(int argc, char *argv[])
                 active_spine_viewer->update(dt);
             }
 
-            const float spine_w = (float)window_width * 0.9f;
-            const float spine_h = (float)window_height * 0.9f;
-            const float spine_x = ((float)window_width - spine_w) * 0.5f;
-            const float spine_y = ((float)window_height - spine_h) * 0.5f;
-            if (nk_begin(ctx, "Spine Viewer",
-                         nk_rect(spine_x, spine_y, spine_w, spine_h),
-                         NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
-                         NK_WINDOW_CLOSABLE | NK_WINDOW_TITLE))
+            if (nk_begin(ctx, "SpineViewer",
+                         nk_rect(0, 0, (float)window_width, (float)window_height),
+                         NK_WINDOW_NO_SCROLLBAR))
             {
+                // Skip past toolbar area
+                nk_layout_row_dynamic(ctx, 72, 1);
+                nk_spacing(ctx, 1);
                 if (spine_building) {
                     nk_layout_row_dynamic(ctx, 30, 1);
                     nk_label(ctx, "Building Spine dictionary...", NK_TEXT_CENTERED);
@@ -1940,10 +1938,12 @@ int main(int argc, char *argv[])
                     nk_layout_row_end(ctx);
 
                     // Split: list | viewport | bone editor (when editing)
-                    float list_width = spine_w * 0.22f;
-                    float editor_width = spine_edit_mode ? spine_w * 0.30f : 0;
-                    float viewer_width = spine_w - list_width - editor_width - 50.0f;
-                    float panel_height = spine_h - 95.0f;
+                    float sw = (float)window_width;
+                    float sh = (float)window_height - 75.0f; // below toolbar
+                    float list_width = sw * 0.22f;
+                    float editor_width = spine_edit_mode ? sw * 0.30f : 0;
+                    float viewer_width = sw - list_width - editor_width - 50.0f;
+                    float panel_height = sh - 55.0f;
 
                     nk_layout_row_begin(ctx, NK_STATIC, panel_height, spine_edit_mode ? 3 : 2);
 
@@ -2679,10 +2679,6 @@ int main(int argc, char *argv[])
                     nk_layout_row_end(ctx);
                 }
             }
-            else
-            {
-                show_spine_viewer = false;
-            }
             nk_end(ctx);
         }
 
@@ -2974,18 +2970,22 @@ int main(int argc, char *argv[])
                 nk_widget_disable_end(ctx);
             }
 
-            if (tree_scanned && !is_task_running && nk_button_label_styled(ctx, &btn_style, "Spine Viewer"))
+            if (tree_scanned && !is_task_running && nk_button_label_styled(ctx, &btn_style, show_spine_viewer ? "File Tree" : "Spine Viewer"))
             {
-                if (!spine_dictionary.IsBuilt() && !spine_building) {
-                    spine_building = true;
-                    spine_build_future = std::async(std::launch::async, []() {
-                        try {
-                            spine_dictionary.Build(*data_pack, data_pack->GetFileTree());
-                        } catch (...) {}
-                        spine_building = false;
-                    });
+                if (!show_spine_viewer) {
+                    if (!spine_dictionary.IsBuilt() && !spine_building) {
+                        spine_building = true;
+                        spine_build_future = std::async(std::launch::async, []() {
+                            try {
+                                spine_dictionary.Build(*data_pack, data_pack->GetFileTree());
+                            } catch (...) {}
+                            spine_building = false;
+                        });
+                    }
+                    show_spine_viewer = true;
+                } else {
+                    show_spine_viewer = false;
                 }
-                show_spine_viewer = true;
             }
             else if (!tree_scanned || is_task_running)
             {
@@ -2999,6 +2999,9 @@ int main(int argc, char *argv[])
                 show_credits_window = true;
             }
 
+            float content_height = (float)window_height - 85;
+
+          if (!show_spine_viewer) {
             nk_layout_row_begin(ctx, NK_STATIC, 30, 2);
             nk_layout_row_push(ctx, 80);
             nk_label(ctx, "Search:", NK_TEXT_LEFT);
@@ -3006,8 +3009,6 @@ int main(int argc, char *argv[])
             nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, search_buffer, sizeof(search_buffer), nk_filter_default);
             search_query = search_buffer;
             nk_layout_row_end(ctx);
-
-            float content_height = (float)window_height - 85;
             bool showing_preview_panel = (current_preview_mode != PreviewMode::None || !preview_error.empty());
 
             static float sidebar_width = 600.0f;
@@ -3543,6 +3544,7 @@ int main(int argc, char *argv[])
             }
 
             nk_layout_row_end(ctx);
+          } // end if (!show_spine_viewer)
 
             nk_layout_row_dynamic(ctx, 28, 1);
             if (selection_exists)
