@@ -3826,7 +3826,7 @@ int main(int argc, char *argv[])
                         static bool spine_autoplay = false;
                         static bool spine_pma_blend = true;
                         static bool spine_pma_tex = true;
-                        static int spine_bg_preset = 1; // 0=dark, 1=mid, 2=light, 3=white
+                        static int spine_bg_preset = 0; // 0=none, 1=dark, 2=mid, 3=white
                         nk_layout_row_begin(ctx, NK_STATIC, 24, 7);
 
                         nk_layout_row_push(ctx, 80);
@@ -3875,10 +3875,10 @@ int main(int argc, char *argv[])
                         // Viewport background preset
                         nk_layout_row_push(ctx, 80);
                         {
-                            const char* bg_labels[] = {"BG: Dark", "BG: Mid", "BG: Light", "BG: White"};
+                            const char* bg_labels[] = {"BG: None", "BG: Dark", "BG: Mid", "BG: White"};
                             const float bg_colors[][3] = {
-                                {0.12f, 0.12f, 0.14f}, {0.35f, 0.35f, 0.38f},
-                                {0.65f, 0.65f, 0.68f}, {1.0f, 1.0f, 1.0f}
+                                {0, 0, 0}, {0.12f, 0.12f, 0.14f},
+                                {0.35f, 0.35f, 0.38f}, {1.0f, 1.0f, 1.0f}
                             };
                             struct nk_style_button bb = ctx->style.button;
                             bb.rounding = 3.0f;

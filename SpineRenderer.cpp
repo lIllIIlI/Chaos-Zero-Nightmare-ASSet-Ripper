@@ -631,10 +631,7 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, viewportWidth, viewportHeight);
 
-    // Clear to solid opaque background. Transparent causes double-alpha compositing.
-    // Use configurable background color — lighter backgrounds reduce visible seams
-    // at semi-transparent joints (matching how the game composites over scene backgrounds).
-    glClearColor(bgR, bgG, bgB, 1.0f);
+    glClearColor(bgR, bgG, bgB, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);

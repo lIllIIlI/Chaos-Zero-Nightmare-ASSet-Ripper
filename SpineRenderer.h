@@ -204,7 +204,7 @@ private:
     bool autoplayNext = false;
     int currentAnimIndex = 0;
     std::string errorMsg;
-    float bgR = 0.22f, bgG = 0.22f, bgB = 0.24f; // viewport background (default mid-gray)
+    float bgR = 0, bgG = 0, bgB = 0; // viewport background (default transparent black)
 
     // Cached bounds
     float cachedBoundsX = 0, cachedBoundsY = 0, cachedBoundsW = 0, cachedBoundsH = 0;
