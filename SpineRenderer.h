@@ -121,6 +121,10 @@ public:
     float getPanY() const { return panY; }
     std::string getError() const { return errorMsg; }
 
+    // Viewport background color
+    void setBgColor(float r, float g, float b) { bgR = r; bgG = g; bgB = b; }
+    void getBgColor(float& r, float& g, float& b) const { r = bgR; g = bgG; b = bgB; }
+
     // Bone editing
     struct BoneInfo {
         std::string name;
@@ -200,6 +204,7 @@ private:
     bool autoplayNext = false;
     int currentAnimIndex = 0;
     std::string errorMsg;
+    float bgR = 0.22f, bgG = 0.22f, bgB = 0.24f; // viewport background (default mid-gray)
 
     // Cached bounds
     float cachedBoundsX = 0, cachedBoundsY = 0, cachedBoundsW = 0, cachedBoundsH = 0;

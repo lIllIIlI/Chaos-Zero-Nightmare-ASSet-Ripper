@@ -631,11 +631,10 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, viewportWidth, viewportHeight);
 
-    // Clear to solid opaque background. Transparent (0,0,0,0) causes double-alpha:
-    // FBO compositing over black produces premultiplied content, then Nuklear re-applies
-    // alpha when drawing the FBO texture → edges get darkened (alpha squared).
-    // A solid background means FBO alpha is always 1.0 → no double-blending.
-    glClearColor(0.12f, 0.12f, 0.14f, 1.0f);
+    // Clear to solid opaque background. Transparent causes double-alpha compositing.
+    // Use configurable background color — lighter backgrounds reduce visible seams
+    // at semi-transparent joints (matching how the game composites over scene backgrounds).
+    glClearColor(bgR, bgG, bgB, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
