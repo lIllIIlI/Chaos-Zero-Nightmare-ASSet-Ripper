@@ -135,9 +135,9 @@ static Uint64 spine_last_tick = 0;
 static std::unordered_set<std::string> spine_expanded_categories;
 static std::vector<int> spine_visible_indices; // built during list render
 static bool spine_edit_mode = false;
-static float spine_scale_max = 20.0f;
+static float spine_scale_max = 1000.0f;
 static std::string spine_selected_bone = "";
-static char spine_scale_max_buf[16] = "20.0";
+static char spine_scale_max_buf[16] = "1000";
 
 int get_file_count(const Core::FileNode &node)
 {
@@ -2422,21 +2422,38 @@ int main(int argc, char *argv[])
                                     auto& bi = bones[bi_idx];
                                     bool is_sel = (bi.name == spine_selected_bone);
 
-                                    // Bone name + reset button
-                                    nk_layout_row_begin(ctx, NK_STATIC, 20, 2);
-                                    nk_layout_row_push(ctx, editor_width - 80);
+                                    // Bone name + hide + reset buttons
+                                    nk_layout_row_begin(ctx, NK_STATIC, 20, 3);
+                                    nk_layout_row_push(ctx, editor_width - 110);
                                     struct nk_style_button bone_btn = ctx->style.button;
                                     bone_btn.text_alignment = NK_TEXT_LEFT;
                                     bone_btn.padding = nk_vec2(4, 1);
                                     bone_btn.rounding = 2.0f;
                                     bone_btn.normal = nk_style_item_color(is_sel ? nk_rgb(50, 70, 110) : nk_rgb(35, 35, 40));
                                     bone_btn.hover = nk_style_item_color(nk_rgb(55, 65, 80));
-                                    bone_btn.text_normal = bi.hasOverride ? nk_rgb(255, 200, 80) : (is_sel ? nk_rgb(100, 200, 255) : nk_rgb(180, 180, 180));
+                                    bone_btn.text_normal = bi.hidden ? nk_rgb(100, 100, 100)
+                                        : bi.hasOverride ? nk_rgb(255, 200, 80)
+                                        : is_sel ? nk_rgb(100, 200, 255) : nk_rgb(180, 180, 180);
                                     bone_btn.text_hover = nk_rgb(255, 255, 255);
                                     if (nk_button_label_styled(ctx, &bone_btn, bi.name.c_str())) {
                                         spine_selected_bone = bi.name;
                                     }
-                                    nk_layout_row_push(ctx, 30);
+
+                                    // Hide/show toggle
+                                    nk_layout_row_push(ctx, 22);
+                                    {
+                                        struct nk_style_button hb = ctx->style.button;
+                                        hb.rounding = 2.0f;
+                                        hb.normal = nk_style_item_color(bi.hidden ? nk_rgb(120, 50, 50) : nk_rgb(45, 45, 50));
+                                        hb.hover = nk_style_item_color(nk_rgb(80, 60, 60));
+                                        hb.text_normal = nk_rgb(200, 200, 200);
+                                        if (nk_button_label_styled(ctx, &hb, bi.hidden ? "H" : "V")) {
+                                            active_spine_viewer->toggleBoneHidden(bi.name);
+                                        }
+                                    }
+
+                                    // Reset
+                                    nk_layout_row_push(ctx, 22);
                                     if (bi.hasOverride && nk_button_label(ctx, "R")) {
                                         active_spine_viewer->resetBone(bi.name);
                                     }
@@ -2455,11 +2472,20 @@ int main(int argc, char *argv[])
 
                                             float vals[7] = { bi.x, bi.y, bi.rotation, bi.scaleX, bi.scaleY, bi.shearX, bi.shearY };
                                             for (int f = 0; f < 7; f++) {
+                                                // Auto-range: slider range adapts to the bone's actual value
+                                                float absVal = fabsf(vals[f]);
+                                                float absSetup = fabsf(setup[f]);
+                                                float absAnim = fabsf(anim[f]);
+                                                float autoMax = fmaxf(fmaxf(absVal, absSetup), absAnim);
+                                                autoMax = fmaxf(autoMax * 2.0f, 10.0f); // 2x headroom, min 10
+                                                float sliderMin = -autoMax;
+                                                float sliderMax = autoMax;
+
                                                 nk_layout_row_begin(ctx, NK_STATIC, 20, 3);
                                                 nk_layout_row_push(ctx, 40);
                                                 nk_label_colored(ctx, labels[f], NK_TEXT_RIGHT, nk_rgb(140, 160, 180));
                                                 nk_layout_row_push(ctx, editor_width - 120);
-                                                nk_slider_float(ctx, -spine_scale_max, &vals[f], spine_scale_max, 0.01f);
+                                                nk_slider_float(ctx, sliderMin, &vals[f], sliderMax, 0.01f);
                                                 nk_layout_row_push(ctx, 50);
                                                 char vbuf[16];
                                                 snprintf(vbuf, sizeof(vbuf), "%.2f", vals[f]);

@@ -4,6 +4,7 @@
 #include <spine/spine.h>
 #include <string>
 #include <map>
+#include <set>
 #include <vector>
 #include <memory>
 
@@ -116,6 +117,7 @@ public:
         // Current animated values (read-only, changes each frame)
         float animX, animY, animRot, animSX, animSY, animShX, animShY;
         bool hasOverride;
+        bool hidden;
     };
     std::vector<BoneInfo> getBoneList() const;
     void setBoneOverride(const std::string& boneName, const BoneOverride& ovr);
@@ -123,6 +125,8 @@ public:
     void resetBoneEdits();
     bool hasBoneOverrides() const { return !boneOverrides.empty(); }
     const std::map<std::string, BoneOverride>& getBoneOverrides() const { return boneOverrides; }
+    void toggleBoneHidden(const std::string& boneName);
+    bool isBoneHidden(const std::string& boneName) const;
 
     // Hit testing — returns bone name or empty string
     std::string hitTestBone(float screenX, float screenY, int vpW, int vpH);
@@ -175,6 +179,7 @@ private:
 
     // Bone editing
     std::map<std::string, BoneOverride> boneOverrides;
+    std::set<std::string> hiddenBones;
 
     // Texture swaps (page name → replacement file path)
     std::map<std::string, std::string> textureSwaps;

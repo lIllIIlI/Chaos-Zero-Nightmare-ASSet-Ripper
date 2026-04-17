@@ -607,7 +607,9 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, viewportWidth, viewportHeight);
 
-    glClearColor(0.15f, 0.15f, 0.18f, 1.0f);
+    // Clear to transparent — the Nuklear window provides the background.
+    // Clearing to opaque dark causes black fringe on semi-transparent edges.
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
@@ -671,6 +673,10 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
         spine::Slot* slot = drawOrder[i];
         spine::Attachment* attachment = slot->getAttachment();
         if (!attachment) continue;
+
+        // Skip slots attached to hidden bones
+        std::string slotBoneName(slot->getBone().getData().getName().buffer());
+        if (hiddenBones.count(slotBoneName)) continue;
 
         spine::Color skeletonColor = skeleton->getColor();
         spine::Color slotColor = slot->getColor();
@@ -877,6 +883,7 @@ std::vector<SpineViewer::BoneInfo> SpineViewer::getBoneList() const {
             bi.scaleX = bi.setupSX; bi.scaleY = bi.setupSY;
             bi.shearX = bi.setupShX; bi.shearY = bi.setupShY;
         }
+        bi.hidden = hiddenBones.count(bi.name) > 0;
         list.push_back(bi);
     }
     return list;
@@ -892,6 +899,18 @@ void SpineViewer::resetBone(const std::string& boneName) {
 
 void SpineViewer::resetBoneEdits() {
     boneOverrides.clear();
+    hiddenBones.clear();
+}
+
+void SpineViewer::toggleBoneHidden(const std::string& boneName) {
+    if (hiddenBones.count(boneName))
+        hiddenBones.erase(boneName);
+    else
+        hiddenBones.insert(boneName);
+}
+
+bool SpineViewer::isBoneHidden(const std::string& boneName) const {
+    return hiddenBones.count(boneName) > 0;
 }
 
 // ============================================================================
