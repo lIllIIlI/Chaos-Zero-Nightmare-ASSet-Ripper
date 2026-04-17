@@ -631,9 +631,11 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, viewportWidth, viewportHeight);
 
-    // Clear to transparent — the Nuklear window provides the background.
-    // Clearing to opaque dark causes black fringe on semi-transparent edges.
-    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    // Clear to solid opaque background. Transparent (0,0,0,0) causes double-alpha:
+    // FBO compositing over black produces premultiplied content, then Nuklear re-applies
+    // alpha when drawing the FBO texture → edges get darkened (alpha squared).
+    // A solid background means FBO alpha is always 1.0 → no double-blending.
+    glClearColor(0.12f, 0.12f, 0.14f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
@@ -766,10 +768,11 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
             mesh->computeWorldVertices(*slot, 0, mesh->getWorldVerticesLength(), worldVertices, 0, 2);
 
             spine::Color attachColor = mesh->getColor();
-            float r = tintR * attachColor.r;
-            float g = tintG * attachColor.g;
-            float b = tintB * attachColor.b;
             float a = tintA * attachColor.a;
+            float pm = usePMA ? a : 1.0f;
+            float r = tintR * attachColor.r * pm;
+            float g = tintG * attachColor.g * pm;
+            float b = tintB * attachColor.b * pm;
 
             // Build interleaved vertex data
             static std::vector<float> meshVerts;

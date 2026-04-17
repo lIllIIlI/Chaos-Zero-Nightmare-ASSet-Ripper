@@ -138,6 +138,7 @@ static bool spine_edit_mode = false;
 static float spine_scale_max = 1000.0f;
 static std::string spine_selected_bone = "";
 static char spine_scale_max_buf[16] = "1000";
+static bool spine_scroll_to_bone = false;
 
 int get_file_count(const Core::FileNode &node)
 {
@@ -3911,7 +3912,10 @@ int main(int argc, char *argv[])
                                         ag = active_spine_viewer->hitTestGizmo(lx, ly, vw, vh);
                                         if (ag == SpineViewer::GizmoHandle::None) {
                                             spine_selected_bone = active_spine_viewer->hitTestBone(lx, ly, vw, vh);
-                                            if (!spine_selected_bone.empty()) ag = SpineViewer::GizmoHandle::Move;
+                                            if (!spine_selected_bone.empty()) {
+                                                ag = SpineViewer::GizmoHandle::Move;
+                                                spine_scroll_to_bone = true;
+                                            }
                                         }
                                     }
                                     if (!nk_input_is_mouse_down(inp, NK_BUTTON_LEFT)) ag = SpineViewer::GizmoHandle::None;
@@ -4034,14 +4038,19 @@ int main(int argc, char *argv[])
                         nk_layout_row_end(ctx);
 
                         nk_layout_row_dynamic(ctx, sh - 80, 1);
+                        // Tighter spacing for compact bone list
+                        nk_style_push_vec2(ctx, &ctx->style.window.spacing, nk_vec2(4, 1));
                         if (nk_group_begin(ctx, "BoneList", NK_WINDOW_BORDER)) {
                             auto bones = active_spine_viewer->getBoneList();
+                            int selected_bone_row = -1;
+
                             for (size_t bi_idx = 0; bi_idx < bones.size(); bi_idx++) {
                                 auto& bi = bones[bi_idx];
                                 bool is_sel = (bi.name == spine_selected_bone);
+                                if (is_sel) selected_bone_row = (int)bi_idx;
 
                                 float bone_row_ratios[] = { 0.72f, 0.14f, 0.14f };
-                                nk_layout_row(ctx, NK_DYNAMIC, 20, 3, bone_row_ratios);
+                                nk_layout_row(ctx, NK_DYNAMIC, 18, 3, bone_row_ratios);
                                 struct nk_style_button bone_btn = ctx->style.button;
                                 bone_btn.text_alignment = NK_TEXT_LEFT;
                                 bone_btn.padding = nk_vec2(4, 1);
@@ -4082,17 +4091,38 @@ int main(int argc, char *argv[])
                                     float setup[7] = { bi.setupX, bi.setupY, bi.setupRot, bi.setupSX, bi.setupSY, bi.setupShX, bi.setupShY };
 
                                     if (bi.hasOverride) {
-                                        nk_layout_row_dynamic(ctx, 16, 1);
-                                        nk_label_colored(ctx, "Override (editable):", NK_TEXT_LEFT, nk_rgb(255, 200, 80));
+                                        // Linked scale toggle
+                                        static bool spine_link_scale = true;
+                                        nk_layout_row_dynamic(ctx, 18, 2);
+                                        nk_label_colored(ctx, "Override:", NK_TEXT_LEFT, nk_rgb(255, 200, 80));
+                                        {
+                                            struct nk_style_button lb = ctx->style.button;
+                                            lb.rounding = 2.0f;
+                                            lb.padding = nk_vec2(2, 0);
+                                            lb.normal = nk_style_item_color(spine_link_scale ? nk_rgb(56, 120, 74) : nk_rgb(60, 60, 65));
+                                            lb.hover = nk_style_item_color(spine_link_scale ? nk_rgb(66, 138, 86) : nk_rgb(75, 75, 80));
+                                            lb.text_normal = nk_rgb(200, 200, 200);
+                                            if (nk_button_label_styled(ctx, &lb, spine_link_scale ? "Scale: Linked" : "Scale: Free")) {
+                                                spine_link_scale = !spine_link_scale;
+                                            }
+                                        }
 
                                         float vals[7] = { bi.x, bi.y, bi.rotation, bi.scaleX, bi.scaleY, bi.shearX, bi.shearY };
+                                        float oldSclX = vals[3], oldSclY = vals[4];
                                         float steps[7] = { 1.0f, 1.0f, 1.0f, 0.05f, 0.05f, 0.5f, 0.5f };
                                         float pxStep[7] = { 0.5f, 0.5f, 0.5f, 0.01f, 0.01f, 0.1f, 0.1f };
                                         for (int f = 0; f < 7; f++) {
                                             float absMax = fmaxf(fmaxf(fabsf(vals[f]), fabsf(setup[f])), fabsf(anim[f]));
                                             float range = fmaxf(absMax * 3.0f, 10.0f);
-                                            nk_layout_row_dynamic(ctx, 22, 1);
+                                            nk_layout_row_dynamic(ctx, 20, 1);
                                             vals[f] = nk_propertyf(ctx, labels[f], -range, vals[f], range, steps[f], pxStep[f]);
+                                        }
+
+                                        // Linked scale: if one changed, apply same delta to other
+                                        if (spine_link_scale) {
+                                            float dsx = vals[3] - oldSclX, dsy = vals[4] - oldSclY;
+                                            if (dsx != 0 && dsy == 0) vals[4] += dsx;
+                                            if (dsy != 0 && dsx == 0) vals[3] += dsy;
                                         }
 
                                         BoneOverride ovr;
@@ -4111,30 +4141,47 @@ int main(int argc, char *argv[])
                                         }
                                     }
 
-                                    nk_layout_row_dynamic(ctx, 16, 1);
+                                    nk_layout_row_dynamic(ctx, 14, 1);
                                     nk_label_colored(ctx, "Animated (live):", NK_TEXT_LEFT, nk_rgb(100, 180, 255));
-                                    nk_layout_row_dynamic(ctx, 16, 7);
+                                    nk_layout_row_dynamic(ctx, 14, 7);
                                     for (int f = 0; f < 7; f++) {
                                         char abuf[24];
                                         snprintf(abuf, sizeof(abuf), "%s:%.1f", labels[f], anim[f]);
                                         nk_label_colored(ctx, abuf, NK_TEXT_LEFT, nk_rgb(80, 150, 220));
                                     }
 
-                                    nk_layout_row_dynamic(ctx, 16, 1);
+                                    nk_layout_row_dynamic(ctx, 14, 1);
                                     nk_label_colored(ctx, "Setup pose:", NK_TEXT_LEFT, nk_rgb(100, 200, 100));
-                                    nk_layout_row_dynamic(ctx, 16, 7);
+                                    nk_layout_row_dynamic(ctx, 14, 7);
                                     for (int f = 0; f < 7; f++) {
                                         char sbuf[24];
                                         snprintf(sbuf, sizeof(sbuf), "%s:%.1f", labels[f], setup[f]);
                                         nk_label_colored(ctx, sbuf, NK_TEXT_LEFT, nk_rgb(80, 170, 80));
                                     }
 
-                                    nk_layout_row_dynamic(ctx, 5, 1);
+                                    nk_layout_row_dynamic(ctx, 3, 1);
                                     nk_spacing(ctx, 1);
                                 }
                             }
+
+                            // Auto-scroll to selected bone when it changes (e.g. viewport click)
+                            if (spine_scroll_to_bone && selected_bone_row >= 0) {
+                                float row_h = 18.0f + ctx->style.window.spacing.y;
+                                float target_y = selected_bone_row * row_h;
+                                nk_uint cx, cy;
+                                nk_group_get_scroll(ctx, "BoneList", &cx, &cy);
+                                float view_h = nk_window_get_content_region(ctx).h;
+                                if (target_y < (float)cy || target_y + row_h > (float)cy + view_h) {
+                                    float scroll_to = target_y - view_h * 0.3f;
+                                    if (scroll_to < 0) scroll_to = 0;
+                                    nk_group_set_scroll(ctx, "BoneList", cx, (nk_uint)scroll_to);
+                                }
+                                spine_scroll_to_bone = false;
+                            }
+
                             nk_group_end(ctx);
                         }
+                        nk_style_pop_vec2(ctx);
 
                         nk_group_end(ctx);
                     }
