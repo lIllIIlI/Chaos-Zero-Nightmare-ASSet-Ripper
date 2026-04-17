@@ -146,6 +146,15 @@ public:
     std::string hitTestBone(float screenX, float screenY, int vpW, int vpH);
     int selectedBoneIndex = -1;
 
+    // Transform gizmo
+    enum class GizmoHandle { None, Move, ScaleTL, ScaleTR, ScaleBL, ScaleBR, Rotate };
+    struct GizmoState {
+        float bboxMinX, bboxMinY, bboxMaxX, bboxMaxY; // world-space bounding box
+        bool valid = false;
+    };
+    GizmoState getSelectedBoneGizmo() const;
+    GizmoHandle hitTestGizmo(float screenX, float screenY, int vpW, int vpH) const;
+
     // Texture info and swap
     struct TextureInfo { std::string name; int width; int height; GLuint glId; };
     std::vector<TextureInfo> getTextureList() const;

@@ -803,70 +803,102 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
         LogError("SpineViewer::render unknown exception");
     }
 
-    // Draw selected bone marker (crosshair + circle)
+    // Draw transform gizmo on selected bone
     if (selectedBoneIndex >= 0) {
-        auto& bones = skeleton->getBones();
-        if (selectedBoneIndex < (int)bones.size()) {
-            float bx = bones[selectedBoneIndex]->getWorldX();
-            float by = bones[selectedBoneIndex]->getWorldY();
-            float markerSize = cachedBoundsW * 0.02f; // 2% of view width
-            if (markerSize < 3) markerSize = 3;
-
-            // Draw a diamond shape at the bone position (no texture needed — use white pixel trick)
-            // Since we don't have a white texture, draw colored lines via thin quads
-            float cr = 1.0f, cg = 0.3f, cb = 0.3f, ca = 0.9f;
-            if (usePMA) { cr *= ca; cg *= ca; cb *= ca; }
-
-            // Create a 1x1 white texture for the marker (lazy init)
-            static GLuint markerTex = 0;
-            if (!markerTex) {
+        GizmoState gs = getSelectedBoneGizmo();
+        if (gs.valid) {
+            // 1x1 white texture for drawing lines/rects
+            static GLuint gizmoTex = 0;
+            if (!gizmoTex) {
                 unsigned char white[] = { 255, 255, 255, 255 };
-                glGenTextures(1, &markerTex);
-                glBindTexture(GL_TEXTURE_2D, markerTex);
+                glGenTextures(1, &gizmoTex);
+                glBindTexture(GL_TEXTURE_2D, gizmoTex);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white);
             }
+            unsigned short qi[] = { 0,1,2, 2,3,0 };
 
-            // Horizontal line
-            float hw = markerSize, hh = markerSize * 0.08f;
-            float hVerts[] = {
-                bx - hw, by - hh, 0,0, cr,cg,cb,ca,
-                bx + hw, by - hh, 1,0, cr,cg,cb,ca,
-                bx + hw, by + hh, 1,1, cr,cg,cb,ca,
-                bx - hw, by + hh, 0,1, cr,cg,cb,ca,
-            };
-            unsigned short hIdx[] = { 0,1,2, 2,3,0 };
-            batchRenderer.addTriangles(markerTex, hVerts, 4, hIdx, 6, spine::BlendMode_Normal);
+            float lineW = (gs.bboxMaxX - gs.bboxMinX) * 0.005f;
+            if (lineW < 0.5f) lineW = 0.5f;
 
-            // Vertical line
-            float vw = markerSize * 0.08f, vh = markerSize;
-            float vVerts[] = {
-                bx - vw, by - vh, 0,0, cr,cg,cb,ca,
-                bx + vw, by - vh, 1,0, cr,cg,cb,ca,
-                bx + vw, by + vh, 1,1, cr,cg,cb,ca,
-                bx - vw, by + vh, 0,1, cr,cg,cb,ca,
-            };
-            batchRenderer.addTriangles(markerTex, vVerts, 4, hIdx, 6, spine::BlendMode_Normal);
+            // Box outline color (cyan)
+            float lr = 0.0f, lg = 0.85f, lb = 1.0f, la = 0.8f;
+            if (usePMA) { lr *= la; lg *= la; lb *= la; }
 
-            // Outer ring (8-segment diamond)
-            float r2 = markerSize * 1.5f;
-            float ringW = markerSize * 0.06f;
-            int segments = 12;
-            for (int s = 0; s < segments; s++) {
-                float a1 = (float)s / segments * 6.2832f;
-                float a2 = (float)(s + 1) / segments * 6.2832f;
-                float x1i = bx + cosf(a1) * (r2 - ringW), y1i = by + sinf(a1) * (r2 - ringW);
-                float x1o = bx + cosf(a1) * (r2 + ringW), y1o = by + sinf(a1) * (r2 + ringW);
-                float x2i = bx + cosf(a2) * (r2 - ringW), y2i = by + sinf(a2) * (r2 - ringW);
-                float x2o = bx + cosf(a2) * (r2 + ringW), y2o = by + sinf(a2) * (r2 + ringW);
-                float rVerts[] = {
-                    x1i, y1i, 0,0, cr,cg,cb,ca,
-                    x1o, y1o, 1,0, cr,cg,cb,ca,
-                    x2o, y2o, 1,1, cr,cg,cb,ca,
-                    x2i, y2i, 0,1, cr,cg,cb,ca,
+            auto drawLine = [&](float x1, float y1, float x2, float y2) {
+                float dx = x2 - x1, dy = y2 - y1;
+                float len = sqrtf(dx*dx + dy*dy);
+                if (len < 0.001f) return;
+                float nx = -dy / len * lineW, ny = dx / len * lineW;
+                float v[] = {
+                    x1-nx, y1-ny, 0,0, lr,lg,lb,la,
+                    x1+nx, y1+ny, 1,0, lr,lg,lb,la,
+                    x2+nx, y2+ny, 1,1, lr,lg,lb,la,
+                    x2-nx, y2-ny, 0,1, lr,lg,lb,la,
                 };
-                batchRenderer.addTriangles(markerTex, rVerts, 4, hIdx, 6, spine::BlendMode_Normal);
+                batchRenderer.addTriangles(gizmoTex, v, 4, qi, 6, spine::BlendMode_Normal);
+            };
+
+            float x0 = gs.bboxMinX, y0 = gs.bboxMinY, x1 = gs.bboxMaxX, y1 = gs.bboxMaxY;
+
+            // Bounding box edges
+            drawLine(x0, y0, x1, y0); // bottom
+            drawLine(x1, y0, x1, y1); // right
+            drawLine(x1, y1, x0, y1); // top
+            drawLine(x0, y1, x0, y0); // left
+
+            // Corner handles (small squares)
+            float hs = (x1 - x0) * 0.025f;
+            if (hs < 2) hs = 2;
+            float hr = 1.0f, hg = 1.0f, hb = 1.0f, ha = 0.9f;
+            if (usePMA) { hr *= ha; hg *= ha; hb *= ha; }
+
+            auto drawHandle = [&](float cx, float cy) {
+                float v[] = {
+                    cx-hs, cy-hs, 0,0, hr,hg,hb,ha,
+                    cx+hs, cy-hs, 1,0, hr,hg,hb,ha,
+                    cx+hs, cy+hs, 1,1, hr,hg,hb,ha,
+                    cx-hs, cy+hs, 0,1, hr,hg,hb,ha,
+                };
+                batchRenderer.addTriangles(gizmoTex, v, 4, qi, 6, spine::BlendMode_Normal);
+            };
+
+            drawHandle(x0, y0); // BL
+            drawHandle(x1, y0); // BR
+            drawHandle(x0, y1); // TL
+            drawHandle(x1, y1); // TR
+
+            // Rotation handle (circle outside top-right)
+            float rotX = x1 + hs * 4, rotY = y1 + hs * 4;
+            // Line from corner to rotation handle
+            drawLine(x1, y1, rotX, rotY);
+            // Rotation circle
+            float rr = 0.9f, rg = 0.5f, rb = 1.0f, ra = 0.9f;
+            if (usePMA) { rr *= ra; rg *= ra; rb *= ra; }
+            float circR = hs * 1.5f;
+            int segs = 10;
+            for (int s = 0; s < segs; s++) {
+                float a1 = (float)s / segs * 6.2832f;
+                float a2 = (float)(s + 1) / segs * 6.2832f;
+                float v[] = {
+                    rotX, rotY, 0.5f, 0.5f, rr,rg,rb,ra,
+                    rotX + cosf(a1)*circR, rotY + sinf(a1)*circR, 0,0, rr,rg,rb,ra,
+                    rotX + cosf(a2)*circR, rotY + sinf(a2)*circR, 1,0, rr,rg,rb,ra,
+                    rotX, rotY, 0.5f, 0.5f, rr,rg,rb,ra, // degenerate 4th vert
+                };
+                unsigned short ti[] = { 0,1,2 };
+                batchRenderer.addTriangles(gizmoTex, v, 3, ti, 3, spine::BlendMode_Normal);
+            }
+
+            // Center crosshair at bone position
+            auto& bonez = skeleton->getBones();
+            if (selectedBoneIndex < (int)bonez.size()) {
+                float bx = bonez[selectedBoneIndex]->getWorldX();
+                float by = bonez[selectedBoneIndex]->getWorldY();
+                float cs = hs * 2;
+                drawLine(bx - cs, by, bx + cs, by);
+                drawLine(bx, by - cs, bx, by + cs);
             }
         }
     }
@@ -1009,6 +1041,92 @@ void SpineViewer::resetBone(const std::string& boneName) {
 void SpineViewer::resetBoneEdits() {
     boneOverrides.clear();
     hiddenBones.clear();
+}
+
+SpineViewer::GizmoState SpineViewer::getSelectedBoneGizmo() const {
+    GizmoState gs;
+    gs.valid = false;
+    if (!skeleton || selectedBoneIndex < 0) return gs;
+
+    auto& bones = skeleton->getBones();
+    if (selectedBoneIndex >= (int)bones.size()) return gs;
+    spine::Bone* selBone = bones[selectedBoneIndex];
+
+    float minX = 1e9f, minY = 1e9f, maxX = -1e9f, maxY = -1e9f;
+    bool found = false;
+    float worldVerts[8192];
+
+    // Find all slots attached to this bone and compute their world vertex bounds
+    auto& drawOrder = skeleton->getDrawOrder();
+    for (size_t i = 0; i < drawOrder.size(); i++) {
+        spine::Slot* slot = drawOrder[i];
+        if (&slot->getBone() != selBone) continue;
+        spine::Attachment* att = slot->getAttachment();
+        if (!att) continue;
+
+        int vertCount = 0;
+        if (att->getRTTI().isExactly(spine::RegionAttachment::rtti)) {
+            auto* reg = static_cast<spine::RegionAttachment*>(att);
+            reg->computeWorldVertices(slot->getBone(), worldVerts, 0, 2);
+            vertCount = 4;
+        } else if (att->getRTTI().isExactly(spine::MeshAttachment::rtti)) {
+            auto* mesh = static_cast<spine::MeshAttachment*>(att);
+            vertCount = (int)mesh->getWorldVerticesLength() / 2;
+            mesh->computeWorldVertices(*slot, 0, mesh->getWorldVerticesLength(), worldVerts, 0, 2);
+        }
+
+        for (int v = 0; v < vertCount; v++) {
+            float vx = worldVerts[v * 2], vy = worldVerts[v * 2 + 1];
+            if (vx < minX) minX = vx;
+            if (vy < minY) minY = vy;
+            if (vx > maxX) maxX = vx;
+            if (vy > maxY) maxY = vy;
+            found = true;
+        }
+    }
+
+    // Fallback: use bone position with a small default size
+    if (!found) {
+        float bx = selBone->getWorldX(), by = selBone->getWorldY();
+        float sz = cachedBoundsW * 0.05f;
+        minX = bx - sz; minY = by - sz; maxX = bx + sz; maxY = by + sz;
+    }
+
+    gs.bboxMinX = minX; gs.bboxMinY = minY;
+    gs.bboxMaxX = maxX; gs.bboxMaxY = maxY;
+    gs.valid = true;
+    return gs;
+}
+
+SpineViewer::GizmoHandle SpineViewer::hitTestGizmo(float screenX, float screenY, int vpW, int vpH) const {
+    GizmoState gs = getSelectedBoneGizmo();
+    if (!gs.valid) return GizmoHandle::None;
+
+    float wx, wy;
+    const_cast<SpineViewer*>(this)->screenToWorld(screenX, screenY, vpW, vpH, wx, wy);
+
+    float handleSz = (gs.bboxMaxX - gs.bboxMinX) * 0.08f;
+    if (handleSz < 3) handleSz = 3;
+
+    // Corner handles (scale)
+    auto inHandle = [&](float hx, float hy) {
+        return fabsf(wx - hx) < handleSz && fabsf(wy - hy) < handleSz;
+    };
+    if (inHandle(gs.bboxMinX, gs.bboxMaxY)) return GizmoHandle::ScaleTL;
+    if (inHandle(gs.bboxMaxX, gs.bboxMaxY)) return GizmoHandle::ScaleTR;
+    if (inHandle(gs.bboxMinX, gs.bboxMinY)) return GizmoHandle::ScaleBL;
+    if (inHandle(gs.bboxMaxX, gs.bboxMinY)) return GizmoHandle::ScaleBR;
+
+    // Rotate handle (outside top-right corner)
+    float rotX = gs.bboxMaxX + handleSz * 3, rotY = gs.bboxMaxY + handleSz * 3;
+    if (fabsf(wx - rotX) < handleSz * 1.5f && fabsf(wy - rotY) < handleSz * 1.5f)
+        return GizmoHandle::Rotate;
+
+    // Inside bbox = move
+    if (wx >= gs.bboxMinX && wx <= gs.bboxMaxX && wy >= gs.bboxMinY && wy <= gs.bboxMaxY)
+        return GizmoHandle::Move;
+
+    return GizmoHandle::None;
 }
 
 void SpineViewer::toggleBoneHidden(const std::string& boneName) {

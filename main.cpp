@@ -2370,47 +2370,75 @@ int main(int argc, char *argv[])
                                         }
                                     }
 
-                                    // Edit mode interactions
+                                    // Edit mode: gizmo-based manipulation
                                     if (spine_edit_mode) {
-                                        // Left click = select bone
-                                        if (nk_input_is_mouse_pressed(in, NK_BUTTON_LEFT) && !(kmod & (KMOD_SHIFT | KMOD_CTRL))) {
-                                            float localX = in->mouse.pos.x - viewport_bounds.x;
-                                            float localY = in->mouse.pos.y - viewport_bounds.y;
-                                            spine_selected_bone = active_spine_viewer->hitTestBone(localX, localY, vpw, vph);
-                                        }
+                                        static SpineViewer::GizmoHandle activeGizmo = SpineViewer::GizmoHandle::None;
+                                        float localX = in->mouse.pos.x - viewport_bounds.x;
+                                        float localY = in->mouse.pos.y - viewport_bounds.y;
 
-                                        // Left drag (no modifier) on selected bone = move bone
-                                        if (!spine_selected_bone.empty() && nk_input_is_mouse_down(in, NK_BUTTON_LEFT)
-                                            && !(kmod & (KMOD_SHIFT | KMOD_CTRL | KMOD_ALT))
-                                            && (dx != 0 || dy != 0)) {
-                                            // Convert pixel delta to world units
-                                            float viewW = active_spine_viewer->getZoom() > 0 ? (float)vpw / active_spine_viewer->getZoom() : (float)vpw;
-                                            float sc = viewW / (float)vpw;
-                                            auto bones = active_spine_viewer->getBoneList();
-                                            for (auto& b : bones) {
-                                                if (b.name == spine_selected_bone) {
-                                                    BoneOverride ovr;
-                                                    ovr.x = b.x + dx * sc;
-                                                    ovr.y = b.y - dy * sc; // Y is inverted
-                                                    ovr.rotation = b.rotation;
-                                                    ovr.scaleX = b.scaleX; ovr.scaleY = b.scaleY;
-                                                    ovr.shearX = b.shearX; ovr.shearY = b.shearY;
-                                                    active_spine_viewer->setBoneOverride(b.name, ovr);
-                                                    break;
+                                        // On mouse press: check gizmo handle first, then bone hit test
+                                        if (nk_input_is_mouse_pressed(in, NK_BUTTON_LEFT) && !(kmod & KMOD_SHIFT)) {
+                                            activeGizmo = active_spine_viewer->hitTestGizmo(localX, localY, vpw, vph);
+                                            if (activeGizmo == SpineViewer::GizmoHandle::None) {
+                                                // No gizmo hit — try selecting a new bone
+                                                spine_selected_bone = active_spine_viewer->hitTestBone(localX, localY, vpw, vph);
+                                                if (!spine_selected_bone.empty()) {
+                                                    activeGizmo = SpineViewer::GizmoHandle::Move;
                                                 }
                                             }
                                         }
 
-                                        // Right drag on selected bone = rotate bone
-                                        if (!spine_selected_bone.empty() && nk_input_is_mouse_down(in, NK_BUTTON_RIGHT)
-                                            && (dx != 0 || dy != 0)) {
+                                        // On mouse release
+                                        if (!nk_input_is_mouse_down(in, NK_BUTTON_LEFT)) {
+                                            activeGizmo = SpineViewer::GizmoHandle::None;
+                                        }
+
+                                        // Drag with active gizmo handle
+                                        if (activeGizmo != SpineViewer::GizmoHandle::None && !spine_selected_bone.empty()
+                                            && nk_input_is_mouse_down(in, NK_BUTTON_LEFT) && (dx != 0 || dy != 0)) {
+                                            float viewW = active_spine_viewer->getZoom() > 0 ? (float)vpw / active_spine_viewer->getZoom() : (float)vpw;
+                                            float sc = viewW / (float)vpw;
+
+                                            auto bones = active_spine_viewer->getBoneList();
+                                            for (auto& b : bones) {
+                                                if (b.name != spine_selected_bone) continue;
+                                                BoneOverride ovr;
+                                                ovr.x = b.x; ovr.y = b.y; ovr.rotation = b.rotation;
+                                                ovr.scaleX = b.scaleX; ovr.scaleY = b.scaleY;
+                                                ovr.shearX = b.shearX; ovr.shearY = b.shearY;
+
+                                                switch (activeGizmo) {
+                                                    case SpineViewer::GizmoHandle::Move:
+                                                        ovr.x += dx * sc;
+                                                        ovr.y -= dy * sc;
+                                                        break;
+                                                    case SpineViewer::GizmoHandle::ScaleTL:
+                                                    case SpineViewer::GizmoHandle::ScaleTR:
+                                                    case SpineViewer::GizmoHandle::ScaleBL:
+                                                    case SpineViewer::GizmoHandle::ScaleBR:
+                                                        ovr.scaleX += dx * 0.005f;
+                                                        ovr.scaleY -= dy * 0.005f;
+                                                        break;
+                                                    case SpineViewer::GizmoHandle::Rotate:
+                                                        ovr.rotation += dx * 0.5f;
+                                                        break;
+                                                    default: break;
+                                                }
+
+                                                active_spine_viewer->setBoneOverride(b.name, ovr);
+                                                break;
+                                            }
+                                        }
+
+                                        // Ctrl+scroll = scale selected bone
+                                        if (!spine_selected_bone.empty() && scroll != 0 && (kmod & KMOD_CTRL)) {
                                             auto bones = active_spine_viewer->getBoneList();
                                             for (auto& b : bones) {
                                                 if (b.name == spine_selected_bone) {
                                                     BoneOverride ovr;
-                                                    ovr.x = b.x; ovr.y = b.y;
-                                                    ovr.rotation = b.rotation + dx * 0.5f;
-                                                    ovr.scaleX = b.scaleX; ovr.scaleY = b.scaleY;
+                                                    ovr.x = b.x; ovr.y = b.y; ovr.rotation = b.rotation;
+                                                    ovr.scaleX = b.scaleX + scroll * 0.05f;
+                                                    ovr.scaleY = b.scaleY + scroll * 0.05f;
                                                     ovr.shearX = b.shearX; ovr.shearY = b.shearY;
                                                     active_spine_viewer->setBoneOverride(b.name, ovr);
                                                     break;
