@@ -996,8 +996,17 @@ std::vector<SpineViewer::BoneInfo> SpineViewer::getBoneList() const {
         BoneInfo bi;
         bi.name = std::string(bones[i]->getData().getName().buffer());
 
-        // Setup pose values (stable baseline from the skeleton data)
+        // Parent and depth
         spine::BoneData& data = bones[i]->getData();
+        if (data.getParent()) {
+            bi.parentName = std::string(data.getParent()->getName().buffer());
+            int d = 0;
+            spine::BoneData* p = data.getParent();
+            while (p) { d++; p = p->getParent(); }
+            bi.depth = d;
+        }
+
+        // Setup pose values (stable baseline from the skeleton data)
         bi.setupX = data.getX(); bi.setupY = data.getY();
         bi.setupRot = data.getRotation();
         bi.setupSX = data.getScaleX(); bi.setupSY = data.getScaleY();
@@ -1034,6 +1043,20 @@ void SpineViewer::setBoneOverride(const std::string& boneName, const BoneOverrid
 }
 
 void SpineViewer::resetBone(const std::string& boneName) {
+    if (!skeleton) { boneOverrides.erase(boneName); return; }
+    auto& bones = skeleton->getBones();
+    for (size_t i = 0; i < bones.size(); i++) {
+        if (std::string(bones[i]->getData().getName().buffer()) == boneName) {
+            auto& data = bones[i]->getData();
+            BoneOverride ovr;
+            ovr.x = data.getX(); ovr.y = data.getY();
+            ovr.rotation = data.getRotation();
+            ovr.scaleX = data.getScaleX(); ovr.scaleY = data.getScaleY();
+            ovr.shearX = data.getShearX(); ovr.shearY = data.getShearY();
+            boneOverrides[boneName] = ovr;
+            return;
+        }
+    }
     boneOverrides.erase(boneName);
 }
 

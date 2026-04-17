@@ -128,6 +128,8 @@ public:
     // Bone editing
     struct BoneInfo {
         std::string name;
+        std::string parentName;
+        int depth = 0; // 0 = root, 1 = child, etc.
         // Override values (what the user edits — stable, not affected by animation)
         float x, y, rotation, scaleX, scaleY, shearX, shearY;
         // Original setup pose (for reset)

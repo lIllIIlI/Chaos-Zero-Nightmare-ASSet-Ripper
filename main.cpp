@@ -4098,7 +4098,11 @@ int main(int argc, char *argv[])
                                     : bi.hasOverride ? nk_rgb(255, 200, 80)
                                     : is_sel ? nk_rgb(100, 200, 255) : nk_rgb(180, 180, 180);
                                 bone_btn.text_hover = nk_rgb(255, 255, 255);
-                                if (nk_button_label_styled(ctx, &bone_btn, bi.name.c_str())) {
+                                // Indent by hierarchy depth
+                                std::string indent_name;
+                                for (int d = 0; d < bi.depth && d < 6; d++) indent_name += "  ";
+                                indent_name += bi.name;
+                                if (nk_button_label_styled(ctx, &bone_btn, indent_name.c_str())) {
                                     spine_selected_bone = bi.name;
                                     active_spine_viewer->selectedBoneIndex = (int)bi_idx;
                                 }
@@ -4116,7 +4120,7 @@ int main(int argc, char *argv[])
                                     }
                                 }
 
-                                if (bi.hasOverride) {
+                                {
                                     struct nk_style_button rb = ctx->style.button;
                                     rb.padding = nk_vec2(0, 0);
                                     rb.border = 0;
@@ -4124,8 +4128,6 @@ int main(int argc, char *argv[])
                                     if (nk_button_label_styled(ctx, &rb, "R")) {
                                         active_spine_viewer->resetBone(bi.name);
                                     }
-                                } else {
-                                    nk_spacing(ctx, 1);
                                 }
 
                                 if (is_sel) {
