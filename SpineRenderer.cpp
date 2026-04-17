@@ -696,9 +696,19 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
         spine::Attachment* attachment = slot->getAttachment();
         if (!attachment) continue;
 
-        // Skip slots attached to hidden bones
-        std::string slotBoneName(slot->getBone().getData().getName().buffer());
-        if (hiddenBones.count(slotBoneName)) continue;
+        // Skip slots attached to hidden bones (check ancestors too)
+        {
+            bool boneHidden = false;
+            spine::Bone* b = &slot->getBone();
+            while (b) {
+                if (hiddenBones.count(std::string(b->getData().getName().buffer()))) {
+                    boneHidden = true;
+                    break;
+                }
+                b = b->getParent();
+            }
+            if (boneHidden) continue;
+        }
 
         spine::Color skeletonColor = skeleton->getColor();
         spine::Color slotColor = slot->getColor();
