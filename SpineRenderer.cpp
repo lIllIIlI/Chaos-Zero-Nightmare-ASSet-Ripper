@@ -803,6 +803,74 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
         LogError("SpineViewer::render unknown exception");
     }
 
+    // Draw selected bone marker (crosshair + circle)
+    if (selectedBoneIndex >= 0) {
+        auto& bones = skeleton->getBones();
+        if (selectedBoneIndex < (int)bones.size()) {
+            float bx = bones[selectedBoneIndex]->getWorldX();
+            float by = bones[selectedBoneIndex]->getWorldY();
+            float markerSize = cachedBoundsW * 0.02f; // 2% of view width
+            if (markerSize < 3) markerSize = 3;
+
+            // Draw a diamond shape at the bone position (no texture needed — use white pixel trick)
+            // Since we don't have a white texture, draw colored lines via thin quads
+            float cr = 1.0f, cg = 0.3f, cb = 0.3f, ca = 0.9f;
+            if (usePMA) { cr *= ca; cg *= ca; cb *= ca; }
+
+            // Create a 1x1 white texture for the marker (lazy init)
+            static GLuint markerTex = 0;
+            if (!markerTex) {
+                unsigned char white[] = { 255, 255, 255, 255 };
+                glGenTextures(1, &markerTex);
+                glBindTexture(GL_TEXTURE_2D, markerTex);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white);
+            }
+
+            // Horizontal line
+            float hw = markerSize, hh = markerSize * 0.08f;
+            float hVerts[] = {
+                bx - hw, by - hh, 0,0, cr,cg,cb,ca,
+                bx + hw, by - hh, 1,0, cr,cg,cb,ca,
+                bx + hw, by + hh, 1,1, cr,cg,cb,ca,
+                bx - hw, by + hh, 0,1, cr,cg,cb,ca,
+            };
+            unsigned short hIdx[] = { 0,1,2, 2,3,0 };
+            batchRenderer.addTriangles(markerTex, hVerts, 4, hIdx, 6, spine::BlendMode_Normal);
+
+            // Vertical line
+            float vw = markerSize * 0.08f, vh = markerSize;
+            float vVerts[] = {
+                bx - vw, by - vh, 0,0, cr,cg,cb,ca,
+                bx + vw, by - vh, 1,0, cr,cg,cb,ca,
+                bx + vw, by + vh, 1,1, cr,cg,cb,ca,
+                bx - vw, by + vh, 0,1, cr,cg,cb,ca,
+            };
+            batchRenderer.addTriangles(markerTex, vVerts, 4, hIdx, 6, spine::BlendMode_Normal);
+
+            // Outer ring (8-segment diamond)
+            float r2 = markerSize * 1.5f;
+            float ringW = markerSize * 0.06f;
+            int segments = 12;
+            for (int s = 0; s < segments; s++) {
+                float a1 = (float)s / segments * 6.2832f;
+                float a2 = (float)(s + 1) / segments * 6.2832f;
+                float x1i = bx + cosf(a1) * (r2 - ringW), y1i = by + sinf(a1) * (r2 - ringW);
+                float x1o = bx + cosf(a1) * (r2 + ringW), y1o = by + sinf(a1) * (r2 + ringW);
+                float x2i = bx + cosf(a2) * (r2 - ringW), y2i = by + sinf(a2) * (r2 - ringW);
+                float x2o = bx + cosf(a2) * (r2 + ringW), y2o = by + sinf(a2) * (r2 + ringW);
+                float rVerts[] = {
+                    x1i, y1i, 0,0, cr,cg,cb,ca,
+                    x1o, y1o, 1,0, cr,cg,cb,ca,
+                    x2o, y2o, 1,1, cr,cg,cb,ca,
+                    x2i, y2i, 0,1, cr,cg,cb,ca,
+                };
+                batchRenderer.addTriangles(markerTex, rVerts, 4, hIdx, 6, spine::BlendMode_Normal);
+            }
+        }
+    }
+
     batchRenderer.end();
 
     // Restore GL state

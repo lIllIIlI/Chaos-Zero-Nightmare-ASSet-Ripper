@@ -2538,8 +2538,8 @@ int main(int argc, char *argv[])
                                     bool is_sel = (bi.name == spine_selected_bone);
 
                                     // Bone name + hide + reset buttons
-                                    nk_layout_row_begin(ctx, NK_STATIC, 20, 3);
-                                    nk_layout_row_push(ctx, editor_width - 110);
+                                    float bone_row_ratios[] = { 0.72f, 0.14f, 0.14f };
+                                    nk_layout_row(ctx, NK_DYNAMIC, 20, 3, bone_row_ratios);
                                     struct nk_style_button bone_btn = ctx->style.button;
                                     bone_btn.text_alignment = NK_TEXT_LEFT;
                                     bone_btn.padding = nk_vec2(4, 1);
@@ -2555,7 +2555,6 @@ int main(int argc, char *argv[])
                                     }
 
                                     // Hide/show toggle
-                                    nk_layout_row_push(ctx, 22);
                                     {
                                         struct nk_style_button hb = ctx->style.button;
                                         hb.rounding = 2.0f;
@@ -2568,11 +2567,13 @@ int main(int argc, char *argv[])
                                     }
 
                                     // Reset
-                                    nk_layout_row_push(ctx, 22);
-                                    if (bi.hasOverride && nk_button_label(ctx, "R")) {
-                                        active_spine_viewer->resetBone(bi.name);
+                                    if (bi.hasOverride) {
+                                        if (nk_button_label(ctx, "R")) {
+                                            active_spine_viewer->resetBone(bi.name);
+                                        }
+                                    } else {
+                                        nk_spacing(ctx, 1);
                                     }
-                                    nk_layout_row_end(ctx);
 
                                     // Property rows (only for selected bone)
                                     if (is_sel) {
@@ -2593,12 +2594,8 @@ int main(int argc, char *argv[])
                                                 float absMax = fmaxf(fmaxf(fabsf(vals[f]), fabsf(setup[f])), fabsf(anim[f]));
                                                 float range = fmaxf(absMax * 3.0f, 10.0f);
 
-                                                nk_layout_row_begin(ctx, NK_STATIC, 22, 1);
-                                                nk_layout_row_push(ctx, editor_width - 35);
-                                                // nk_property_float: label, min, val, max, step, per-pixel-step
-                                                // Has built-in +/- buttons, click-to-type, and drag
+                                                nk_layout_row_dynamic(ctx, 22, 1);
                                                 vals[f] = nk_propertyf(ctx, labels[f], -range, vals[f], range, steps[f], pxStep[f]);
-                                                nk_layout_row_end(ctx);
                                             }
 
                                             // Apply changes
@@ -2623,26 +2620,22 @@ int main(int argc, char *argv[])
                                         // Animated values (read-only, always shown)
                                         nk_layout_row_dynamic(ctx, 16, 1);
                                         nk_label_colored(ctx, "Animated (live):", NK_TEXT_LEFT, nk_rgb(100, 180, 255));
-                                        nk_layout_row_begin(ctx, NK_STATIC, 16, 7);
+                                        nk_layout_row_dynamic(ctx, 16, 7);
                                         for (int f = 0; f < 7; f++) {
-                                            nk_layout_row_push(ctx, (editor_width - 30) / 7.0f);
                                             char abuf[24];
                                             snprintf(abuf, sizeof(abuf), "%s:%.1f", labels[f], anim[f]);
                                             nk_label_colored(ctx, abuf, NK_TEXT_LEFT, nk_rgb(80, 150, 220));
                                         }
-                                        nk_layout_row_end(ctx);
 
                                         // Setup pose (read-only)
                                         nk_layout_row_dynamic(ctx, 16, 1);
                                         nk_label_colored(ctx, "Setup pose:", NK_TEXT_LEFT, nk_rgb(100, 200, 100));
-                                        nk_layout_row_begin(ctx, NK_STATIC, 16, 7);
+                                        nk_layout_row_dynamic(ctx, 16, 7);
                                         for (int f = 0; f < 7; f++) {
-                                            nk_layout_row_push(ctx, (editor_width - 30) / 7.0f);
                                             char sbuf[24];
                                             snprintf(sbuf, sizeof(sbuf), "%s:%.1f", labels[f], setup[f]);
                                             nk_label_colored(ctx, sbuf, NK_TEXT_LEFT, nk_rgb(80, 170, 80));
                                         }
-                                        nk_layout_row_end(ctx);
 
                                         nk_layout_row_dynamic(ctx, 5, 1);
                                         nk_spacing(ctx, 1);
