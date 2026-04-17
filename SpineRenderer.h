@@ -199,7 +199,7 @@ private:
     float zoom = 1.0f;
     float panX = 0, panY = 0;
     bool usePMA = true;
-    bool premultiplyTextures = true;
+    bool premultiplyTextures = false; // ASTC source textures are already PMA — don't re-premultiply
     bool reloadTextures = false;
     bool autoplayNext = false;
     int currentAnimIndex = 0;
