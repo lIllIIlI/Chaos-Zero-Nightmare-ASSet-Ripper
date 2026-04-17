@@ -206,9 +206,10 @@ void SpineBatchRenderer::flush() {
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, batchIndices.size() * sizeof(unsigned short), batchIndices.data(), GL_DYNAMIC_DRAW);
 
     glEnable(GL_BLEND);
+    // PMA blend modes — textures are premultiplied, so source factor is GL_ONE
     switch (currentBlend) {
         case spine::BlendMode_Additive:
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+            glBlendFunc(GL_ONE, GL_ONE);
             break;
         case spine::BlendMode_Multiply:
             glBlendFuncSeparate(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
@@ -216,8 +217,8 @@ void SpineBatchRenderer::flush() {
         case spine::BlendMode_Screen:
             glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
             break;
-        default: // Normal
-            glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        default: // Normal PMA
+            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
             break;
     }
 
@@ -274,7 +275,21 @@ GLuint SpineViewer::loadTextureFromRGBA(const unsigned char* data, int width, in
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+
+    // Premultiply alpha in texture data.
+    // This prevents dark fringe when GL_LINEAR samples between opaque and transparent
+    // pixels in the atlas. With straight alpha, interpolating (R,G,B,255) with (0,0,0,0)
+    // produces dark edges. With PMA, the blend is correct.
+    size_t pixelCount = (size_t)width * height;
+    std::vector<unsigned char> pma(pixelCount * 4);
+    for (size_t i = 0; i < pixelCount; i++) {
+        unsigned int a = data[i * 4 + 3];
+        pma[i * 4 + 0] = (unsigned char)((data[i * 4 + 0] * a + 127) / 255);
+        pma[i * 4 + 1] = (unsigned char)((data[i * 4 + 1] * a + 127) / 255);
+        pma[i * 4 + 2] = (unsigned char)((data[i * 4 + 2] * a + 127) / 255);
+        pma[i * 4 + 3] = (unsigned char)a;
+    }
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pma.data());
     ownedTextures.push_back(tex);
     return tex;
 }
@@ -707,10 +722,10 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
             spine::Vector<float>& uvs = region->getUVs();
 
             spine::Color attachColor = region->getColor();
-            float r = tintR * attachColor.r;
-            float g = tintG * attachColor.g;
-            float b = tintB * attachColor.b;
             float a = tintA * attachColor.a;
+            float r = tintR * attachColor.r * a;
+            float g = tintG * attachColor.g * a;
+            float b = tintB * attachColor.b * a;
 
             for (int j = 0; j < 4; j++) {
                 regionVerts[j * 8 + 0] = worldVertices[j * 2 + 0];
