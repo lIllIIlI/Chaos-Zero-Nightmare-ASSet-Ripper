@@ -206,11 +206,9 @@ void SpineBatchRenderer::flush() {
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, batchIndices.size() * sizeof(unsigned short), batchIndices.data(), GL_DYNAMIC_DRAW);
 
     glEnable(GL_BLEND);
-    // Spine uses premultiplied alpha (PMA) textures by default.
-    // PMA blend modes differ from straight alpha.
     switch (currentBlend) {
         case spine::BlendMode_Additive:
-            glBlendFunc(GL_ONE, GL_ONE);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE);
             break;
         case spine::BlendMode_Multiply:
             glBlendFuncSeparate(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
@@ -219,7 +217,7 @@ void SpineBatchRenderer::flush() {
             glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
             break;
         default: // Normal
-            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+            glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
             break;
     }
 
@@ -269,21 +267,6 @@ void SpineViewer::unload() {
 }
 
 GLuint SpineViewer::loadTextureFromRGBA(const unsigned char* data, int width, int height) {
-    // Premultiply alpha — Spine expects PMA textures for correct blending
-    // of additive effects (blush, glow, lighting, etc.)
-    size_t pixelCount = (size_t)width * height;
-    std::vector<unsigned char> pma(pixelCount * 4);
-    for (size_t i = 0; i < pixelCount; i++) {
-        unsigned char r = data[i * 4 + 0];
-        unsigned char g = data[i * 4 + 1];
-        unsigned char b = data[i * 4 + 2];
-        unsigned char a = data[i * 4 + 3];
-        pma[i * 4 + 0] = (unsigned char)((r * a) / 255);
-        pma[i * 4 + 1] = (unsigned char)((g * a) / 255);
-        pma[i * 4 + 2] = (unsigned char)((b * a) / 255);
-        pma[i * 4 + 3] = a;
-    }
-
     GLuint tex;
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
@@ -291,7 +274,7 @@ GLuint SpineViewer::loadTextureFromRGBA(const unsigned char* data, int width, in
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pma.data());
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
     ownedTextures.push_back(tex);
     return tex;
 }
@@ -718,10 +701,10 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
             spine::Vector<float>& uvs = region->getUVs();
 
             spine::Color attachColor = region->getColor();
+            float r = tintR * attachColor.r;
+            float g = tintG * attachColor.g;
+            float b = tintB * attachColor.b;
             float a = tintA * attachColor.a;
-            float r = tintR * attachColor.r * a; // PMA: premultiply vertex color
-            float g = tintG * attachColor.g * a;
-            float b = tintB * attachColor.b * a;
 
             for (int j = 0; j < 4; j++) {
                 regionVerts[j * 8 + 0] = worldVertices[j * 2 + 0];
@@ -752,10 +735,10 @@ void SpineViewer::render(int viewportWidth, int viewportHeight) {
             mesh->computeWorldVertices(*slot, 0, mesh->getWorldVerticesLength(), worldVertices, 0, 2);
 
             spine::Color attachColor = mesh->getColor();
+            float r = tintR * attachColor.r;
+            float g = tintG * attachColor.g;
+            float b = tintB * attachColor.b;
             float a = tintA * attachColor.a;
-            float r = tintR * attachColor.r * a; // PMA: premultiply vertex color
-            float g = tintG * attachColor.g * a;
-            float b = tintB * attachColor.b * a;
 
             // Build interleaved vertex data
             static std::vector<float> meshVerts;

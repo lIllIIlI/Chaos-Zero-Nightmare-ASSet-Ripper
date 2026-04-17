@@ -2442,48 +2442,56 @@ int main(int argc, char *argv[])
                                     }
                                     nk_layout_row_end(ctx);
 
-                                    // Property rows (only for selected bone to keep it clean)
+                                    // Property rows (only for selected bone)
                                     if (is_sel) {
                                         const char* labels[] = {"X", "Y", "Rot", "SclX", "SclY", "ShrX", "ShrY"};
-                                        float vals[7] = { bi.x, bi.y, bi.rotation, bi.scaleX, bi.scaleY, bi.shearX, bi.shearY };
                                         float anim[7] = { bi.animX, bi.animY, bi.animRot, bi.animSX, bi.animSY, bi.animShX, bi.animShY };
                                         float setup[7] = { bi.setupX, bi.setupY, bi.setupRot, bi.setupSX, bi.setupSY, bi.setupShX, bi.setupShY };
 
-                                        // Section label: Override (editable)
-                                        nk_layout_row_dynamic(ctx, 16, 1);
-                                        nk_label_colored(ctx, "Override:", NK_TEXT_LEFT, nk_rgb(255, 200, 80));
+                                        if (bi.hasOverride) {
+                                            // Editable override sliders
+                                            nk_layout_row_dynamic(ctx, 16, 1);
+                                            nk_label_colored(ctx, "Override (editable):", NK_TEXT_LEFT, nk_rgb(255, 200, 80));
 
-                                        for (int f = 0; f < 7; f++) {
-                                            nk_layout_row_begin(ctx, NK_STATIC, 20, 3);
-                                            nk_layout_row_push(ctx, 40);
-                                            nk_label_colored(ctx, labels[f], NK_TEXT_RIGHT, nk_rgb(140, 160, 180));
-                                            nk_layout_row_push(ctx, editor_width - 120);
-                                            nk_slider_float(ctx, -spine_scale_max, &vals[f], spine_scale_max, 0.01f);
-                                            nk_layout_row_push(ctx, 50);
-                                            char vbuf[16];
-                                            snprintf(vbuf, sizeof(vbuf), "%.2f", vals[f]);
-                                            int vlen = (int)strlen(vbuf);
-                                            nk_edit_string(ctx, NK_EDIT_FIELD | NK_EDIT_SIG_ENTER, vbuf, &vlen, sizeof(vbuf) - 1, nk_filter_float);
-                                            vbuf[vlen] = '\0';
-                                            vals[f] = (float)atof(vbuf);
-                                            nk_layout_row_end(ctx);
-                                        }
+                                            float vals[7] = { bi.x, bi.y, bi.rotation, bi.scaleX, bi.scaleY, bi.shearX, bi.shearY };
+                                            for (int f = 0; f < 7; f++) {
+                                                nk_layout_row_begin(ctx, NK_STATIC, 20, 3);
+                                                nk_layout_row_push(ctx, 40);
+                                                nk_label_colored(ctx, labels[f], NK_TEXT_RIGHT, nk_rgb(140, 160, 180));
+                                                nk_layout_row_push(ctx, editor_width - 120);
+                                                nk_slider_float(ctx, -spine_scale_max, &vals[f], spine_scale_max, 0.01f);
+                                                nk_layout_row_push(ctx, 50);
+                                                char vbuf[16];
+                                                snprintf(vbuf, sizeof(vbuf), "%.2f", vals[f]);
+                                                int vlen = (int)strlen(vbuf);
+                                                nk_edit_string(ctx, NK_EDIT_FIELD | NK_EDIT_SIG_ENTER, vbuf, &vlen, sizeof(vbuf) - 1, nk_filter_float);
+                                                vbuf[vlen] = '\0';
+                                                vals[f] = (float)atof(vbuf);
+                                                nk_layout_row_end(ctx);
+                                            }
 
-                                        // Apply if changed
-                                        if (vals[0] != bi.x || vals[1] != bi.y || vals[2] != bi.rotation ||
-                                            vals[3] != bi.scaleX || vals[4] != bi.scaleY ||
-                                            vals[5] != bi.shearX || vals[6] != bi.shearY) {
+                                            // Apply changes
                                             BoneOverride ovr;
                                             ovr.x = vals[0]; ovr.y = vals[1]; ovr.rotation = vals[2];
                                             ovr.scaleX = vals[3]; ovr.scaleY = vals[4];
                                             ovr.shearX = vals[5]; ovr.shearY = vals[6];
                                             active_spine_viewer->setBoneOverride(bi.name, ovr);
+                                        } else {
+                                            // No override — show animated values read-only, with Edit button
+                                            nk_layout_row_dynamic(ctx, 20, 1);
+                                            if (nk_button_label(ctx, "Start Editing This Bone")) {
+                                                // Create override from current setup pose
+                                                BoneOverride ovr;
+                                                ovr.x = bi.setupX; ovr.y = bi.setupY; ovr.rotation = bi.setupRot;
+                                                ovr.scaleX = bi.setupSX; ovr.scaleY = bi.setupSY;
+                                                ovr.shearX = bi.setupShX; ovr.shearY = bi.setupShY;
+                                                active_spine_viewer->setBoneOverride(bi.name, ovr);
+                                            }
                                         }
 
-                                        // Animated values (read-only)
+                                        // Animated values (read-only, always shown)
                                         nk_layout_row_dynamic(ctx, 16, 1);
                                         nk_label_colored(ctx, "Animated (live):", NK_TEXT_LEFT, nk_rgb(100, 180, 255));
-
                                         nk_layout_row_begin(ctx, NK_STATIC, 16, 7);
                                         for (int f = 0; f < 7; f++) {
                                             nk_layout_row_push(ctx, (editor_width - 30) / 7.0f);
@@ -2493,10 +2501,9 @@ int main(int argc, char *argv[])
                                         }
                                         nk_layout_row_end(ctx);
 
-                                        // Setup pose values (read-only)
+                                        // Setup pose (read-only)
                                         nk_layout_row_dynamic(ctx, 16, 1);
                                         nk_label_colored(ctx, "Setup pose:", NK_TEXT_LEFT, nk_rgb(100, 200, 100));
-
                                         nk_layout_row_begin(ctx, NK_STATIC, 16, 7);
                                         for (int f = 0; f < 7; f++) {
                                             nk_layout_row_push(ctx, (editor_width - 30) / 7.0f);
