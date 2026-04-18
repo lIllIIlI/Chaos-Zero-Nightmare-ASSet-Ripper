@@ -50,9 +50,7 @@ jobs:
             git clone --depth 1 https://github.com/microsoft/vcpkg "$env:RUNNER_TEMP/vcpkg"
             & "$env:RUNNER_TEMP/vcpkg/bootstrap-vcpkg.bat"
           }
-
           & "$env:RUNNER_TEMP/vcpkg/vcpkg.exe" install sdl2 sdl2-image glew --triplet $env:VCPKG_DEFAULT_TRIPLET
-
       - name: Cache ASTC library
         uses: actions/cache@v5
         with:
@@ -63,41 +61,32 @@ jobs:
         shell: pwsh
         run: |
           if (!(Test-Path "libs/astc/astcenc-native-static.lib")) {
-
             git clone --depth 1 --branch 4.x https://github.com/ARM-software/astc-encoder "$env:RUNNER_TEMP/astc"
-
             cmake -S "$env:RUNNER_TEMP/astc" -B "$env:RUNNER_TEMP/astc/build" -A x64
             cmake --build "$env:RUNNER_TEMP/astc/build" --config Release --parallel
-
             $lib = Get-ChildItem "$env:RUNNER_TEMP/astc/build" -Recurse -Filter "*.lib" |
               Where-Object { $_.Name -like "*astc*" } |
               Select-Object -First 1
-
             if (-not $lib) {
               throw "ASTC library not found"
             }
-
             New-Item -ItemType Directory -Force -Path "libs/astc" | Out-Null
             Copy-Item $lib.FullName "libs/astc/astcenc-native-static.lib" -Force
-
             Write-Host "ASTC library copied from $($lib.FullName)"
           }
           else {
             Write-Host "Using cached ASTC library"
           }
-
       - name: Configure CMake
         shell: pwsh
         run: |
           cmake -S . -B build -A x64 `
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} `
             -DCMAKE_TOOLCHAIN_FILE="$env:RUNNER_TEMP/vcpkg/scripts/buildsystems/vcpkg.cmake"
-
       - name: Build
         shell: pwsh
         run: |
           cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
