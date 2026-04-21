@@ -139,6 +139,7 @@ static float spine_scale_max = 1000.0f;
 static std::string spine_selected_bone = "";
 static char spine_scale_max_buf[16] = "1000";
 static bool spine_scroll_to_bone = false;
+static std::unordered_set<std::string> spine_collapsed_bones; // folded in list only, not hidden
 
 int get_file_count(const Core::FileNode &node)
 {
@@ -3904,10 +3905,11 @@ int main(int argc, char *argv[])
                         struct nk_rect vb = nk_widget_bounds(ctx);
                         int vw = (int)vb.w, vh = (int)vb.h;
 
-                        // Mouse interaction
+                        // Mouse interaction (skip if a combo/popup is active)
                         {
                             nk_input* inp = &ctx->input;
-                            if (nk_input_is_mouse_hovering_rect(inp, vb)) {
+                            bool popup_active = (ctx->current && ctx->current->popup.win);
+                            if (!popup_active && nk_input_is_mouse_hovering_rect(inp, vb)) {
                                 float scr = inp->mouse.scroll_delta.y;
                                 float mdx = inp->mouse.delta.x, mdy = inp->mouse.delta.y;
                                 Uint32 km = SDL_GetModState();
@@ -4083,6 +4085,12 @@ int main(int argc, char *argv[])
                             float scroll_target_y = -1;
                             static bool spine_bone_just_reset = false;
 
+                            // Build parent->has_children lookup
+                            std::unordered_set<std::string> has_children;
+                            for (auto& b : bones) {
+                                if (!b.parentName.empty()) has_children.insert(b.parentName);
+                            }
+
                             for (size_t bi_idx = 0; bi_idx < bones.size(); bi_idx++) {
                                 auto& bi = bones[bi_idx];
 
@@ -4093,7 +4101,27 @@ int main(int argc, char *argv[])
                                     if (lower_name.find(bone_query) == std::string::npos) continue;
                                 }
 
+                                // Skip if an ancestor is collapsed in the list
+                                if (bone_query.empty()) {
+                                    bool ancestor_collapsed = false;
+                                    // Walk up parents using the bone list data
+                                    std::string check = bi.parentName;
+                                    int safety = 0;
+                                    while (!check.empty() && safety++ < 20) {
+                                        if (spine_collapsed_bones.count(check)) { ancestor_collapsed = true; break; }
+                                        // Find parent's parent
+                                        bool found = false;
+                                        for (auto& pb : bones) {
+                                            if (pb.name == check) { check = pb.parentName; found = true; break; }
+                                        }
+                                        if (!found) break;
+                                    }
+                                    if (ancestor_collapsed) continue;
+                                }
+
                                 bool is_sel = (bi.name == spine_selected_bone);
+                                bool is_parent = has_children.count(bi.name) > 0;
+                                bool is_collapsed = spine_collapsed_bones.count(bi.name) > 0;
 
                                 // Bone row: indent spacer + name + H + R
                                 float indent_px = bi.depth * 10.0f;
@@ -4134,7 +4162,14 @@ int main(int argc, char *argv[])
                                     : bi.hasOverride ? nk_rgb(255, 200, 80)
                                     : is_sel ? nk_rgb(100, 200, 255) : nk_rgb(180, 180, 180);
                                 bone_btn.text_hover = nk_rgb(255, 255, 255);
-                                if (nk_button_label_styled(ctx, &bone_btn, bi.name.c_str())) {
+                                std::string bone_label = bi.name;
+                                if (is_parent) bone_label = (is_collapsed ? "+ " : "- ") + bone_label;
+                                if (nk_button_label_styled(ctx, &bone_btn, bone_label.c_str())) {
+                                    if (is_parent && bi.name == spine_selected_bone) {
+                                        // Second click on same parent toggles collapse
+                                        if (is_collapsed) spine_collapsed_bones.erase(bi.name);
+                                        else spine_collapsed_bones.insert(bi.name);
+                                    }
                                     spine_selected_bone = bi.name;
                                     active_spine_viewer->selectedBoneIndex = (int)bi_idx;
                                     spine_bone_just_reset = false;
