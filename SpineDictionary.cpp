@@ -67,32 +67,36 @@ namespace {
             || ext == ".jpeg" || ext == ".bmp" || ext == ".webp" || ext == ".tga";
     }
 
-    // Build a display name from a full path by stripping the top-level category
-    // and the filename, showing the remaining folder path.
-    // "spine/e_terra_underlab_1/-1800.scsp" -> "e_terra_underlab_1"
+    // Build a display name from full path. Shows folder path + filename when needed.
+    // "face/portrait/30084.scsp" -> "portrait/30084"
+    // "model/30084.scsp" -> "30084"
     // "spine/characters/hero_01/model/model.scsp" -> "characters/hero_01/model"
-    // "bg/e_terra_underlab_1/model.scsp" -> "e_terra_underlab_1"
+    // Always appends the filename (without ext) when the last folder == filename base,
+    // or when there's only one folder level to avoid all entries showing the same name.
     std::string build_display_name(const std::string& full_path) {
         auto parts = split_path(full_path);
         if (parts.size() <= 1) return strip_extension(get_basename(full_path));
 
-        // Remove filename (last part) and category (first part)
-        // What remains is the meaningful path
-        // e.g. ["spine", "characters", "hero_01", "model", "model.scsp"]
-        //   -> strip first and last -> ["characters", "hero_01", "model"]
-        //   -> "characters/hero_01/model"
-        std::string result;
+        std::string filename = strip_extension(parts.back());
         size_t start = 1;  // skip category (first component)
-        size_t end = parts.size() - 1;  // skip filename (last component)
+        size_t end = parts.size() - 1;  // skip filename
 
         if (start >= end) {
             // Only category + filename, no middle path
-            return strip_extension(parts.back());
+            return filename;
         }
 
+        std::string result;
         for (size_t i = start; i < end; i++) {
             if (!result.empty()) result += "/";
             result += parts[i];
+        }
+
+        // Always append the filename if the folder path alone is too generic
+        // (i.e., only one folder component between category and filename)
+        // This prevents "face/portrait/30084.scsp" from showing as just "portrait"
+        if (end - start <= 1 && filename != parts[end - 1]) {
+            result += "/" + filename;
         }
 
         return result;
